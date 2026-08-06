@@ -60,8 +60,24 @@ window.__hintora = window.__hintora || {};
     hide();
   }
 
+  // Tears down whatever the *previous* show() set up. Without this, calling
+  // show() again (e.g. advancing to step 2 of a workflow) leaked the old
+  // interval/observer/listeners, which piled up across every query in a
+  // session — harmless individually, but each leaked MutationObserver kept
+  // firing on every DOM mutation on the page for as long as the tab stayed
+  // open.
+  function stopTracking() {
+    window.removeEventListener("scroll", place, { capture: true });
+    window.removeEventListener("resize", place);
+    if (pollId) clearInterval(pollId);
+    if (mo) mo.disconnect();
+    pollId = null;
+    mo = null;
+  }
+
   function show({ el, message, onLost }) {
     ensureNodes();
+    stopTracking();
     currentTarget = el;
     onLostCallback = onLost || null;
     callout._textEl.textContent = message;
@@ -87,10 +103,7 @@ window.__hintora = window.__hintora || {};
     currentTarget = null;
     if (box) box.style.display = "none";
     if (callout) callout.style.display = "none";
-    window.removeEventListener("scroll", place, { capture: true });
-    window.removeEventListener("resize", place);
-    if (pollId) clearInterval(pollId);
-    if (mo) mo.disconnect();
+    stopTracking();
   }
 
   window.__hintora.overlay = { show, hide };

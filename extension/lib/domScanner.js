@@ -97,6 +97,7 @@ window.__hintora = window.__hintora || {};
 
     for (const el of nodes) {
       if (seen.has(el) || !isVisible(el)) continue;
+      if (el.closest("#hintora-root")) continue; // never target our own widget
       seen.add(el);
       const name = getAccessibleName(el);
       candidates.push({

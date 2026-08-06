@@ -132,8 +132,8 @@
     }
 
     setStatus(`Found it: "${top.name}" (confidence score ${top.score.toFixed(1)})`);
-    renderChips(examplesFor(location.hostname));
     showStep(top, query);
+    renderChips(examplesFor(location.hostname));
   }
 
   function showStep(target, query, stepLabel) {
