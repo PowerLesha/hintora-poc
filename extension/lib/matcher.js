@@ -23,7 +23,7 @@ window.__hintora = window.__hintora || {};
     ["edit", "change", "update", "modify", "rename"],
     ["save", "star", "bookmark", "favorite", "keep"],
     ["copy", "duplicate", "fork", "clone", "own"],
-    ["download", "export", "zip", "save", "local"],
+    ["download", "export", "zip", "local"],
     ["share", "invite", "collaborate", "collaborator", "team"],
     ["notify", "watch", "subscribe", "follow", "updates", "alert"],
     ["report", "flag", "issue", "bug", "problem"],
@@ -62,7 +62,16 @@ window.__hintora = window.__hintora || {};
   function match(query, candidates, siteBoost) {
     const queryTokens = expand(tokenize(query));
     const results = candidates.map((c) => {
-      const nameTokens = expand(tokenize(c.name));
+      // Deliberately NOT expanded with synonyms: a button literally named
+      // "Report repository" contains the word "report", which would
+      // otherwise pull in unrelated words from the whole report/flag/issue/
+      // bug/problem group and make it look like a strong match for "how do
+      // I report a bug" — beating the real answer (the Issues tab, whose
+      // literal name doesn't contain "report" at all). Expanding only the
+      // user's side keeps the widening one-directional: we're generous
+      // about how the user might phrase their intent, not about what a
+      // button's own label secretly "means".
+      const nameTokens = new Set(tokenize(c.name));
       let overlap = 0;
       for (const t of queryTokens) if (nameTokens.has(t)) overlap += 1;
 
