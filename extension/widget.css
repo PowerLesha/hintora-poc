@@ -1,0 +1,146 @@
+/* Spotlight + callout (the "guidance" overlay) */
+.hintora-spotlight {
+  position: fixed;
+  display: none;
+  z-index: 2147483000;
+  border: 2px solid #6d5bff;
+  border-radius: 10px;
+  box-shadow: 0 0 0 4px rgba(109, 91, 255, 0.25), 0 0 0 9999px rgba(15, 12, 30, 0.35);
+  pointer-events: none;
+  animation: hintora-pulse 1.6s ease-in-out infinite;
+}
+@keyframes hintora-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(109, 91, 255, 0.25), 0 0 0 9999px rgba(15, 12, 30, 0.35); }
+  50% { box-shadow: 0 0 0 8px rgba(109, 91, 255, 0.12), 0 0 0 9999px rgba(15, 12, 30, 0.35); }
+}
+
+.hintora-callout {
+  position: fixed;
+  display: none;
+  z-index: 2147483001;
+  max-width: 280px;
+  background: #211c3d;
+  color: #f4f2ff;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+.hintora-callout::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 7px solid transparent;
+  top: -14px;
+  border-bottom-color: #211c3d;
+}
+.hintora-callout-above::before {
+  top: auto;
+  bottom: -14px;
+  border-bottom-color: transparent;
+  border-top-color: #211c3d;
+}
+
+/* Floating widget */
+#hintora-root {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  z-index: 2147483002;
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+#hintora-root * { box-sizing: border-box; }
+
+.hintora-bubble {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6d5bff, #a084ff);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 6px 20px rgba(109, 91, 255, 0.45);
+  border: none;
+}
+
+.hintora-panel {
+  width: 320px;
+  background: #17142b;
+  color: #f4f2ff;
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.hintora-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, #6d5bff, #4d3fc9);
+  font-weight: 600;
+}
+.hintora-panel-header button {
+  background: none;
+  border: none;
+  color: white;
+  font-size: 16px;
+  cursor: pointer;
+  opacity: 0.8;
+}
+.hintora-panel-header button:hover { opacity: 1; }
+
+.hintora-panel-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+
+.hintora-input-row { display: flex; gap: 6px; }
+.hintora-input-row input {
+  flex: 1;
+  background: #241f42;
+  border: 1px solid #3a3364;
+  color: #f4f2ff;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: inherit;
+  outline: none;
+}
+.hintora-input-row input:focus { border-color: #6d5bff; }
+.hintora-input-row button {
+  background: #6d5bff;
+  border: none;
+  color: white;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.hintora-input-row button:hover { background: #5947e0; }
+
+.hintora-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.hintora-chip {
+  background: #241f42;
+  border: 1px solid #3a3364;
+  color: #cfc9ff;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.hintora-chip:hover { border-color: #6d5bff; color: white; }
+
+.hintora-status {
+  font-size: 12px;
+  color: #b8b2e0;
+  min-height: 16px;
+}
+.hintora-status.hintora-status-error { color: #ff9d9d; }
+
+.hintora-hidden { display: none !important; }
