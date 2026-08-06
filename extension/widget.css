@@ -82,14 +82,13 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 21px;
-  font-weight: 700;
   cursor: pointer;
   box-shadow: 0 8px 24px rgba(91, 61, 240, 0.45);
   border: none;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   animation: hintora-bubble-intro 1.6s cubic-bezier(0.4, 0, 0.2, 1) 1;
 }
+.hintora-bubble .hintora-pointer-icon { width: 22px; height: 22px; }
 .hintora-bubble:hover {
   transform: translateY(-2px) scale(1.03);
   box-shadow: 0 10px 28px rgba(91, 61, 240, 0.55);
@@ -140,10 +139,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
-  font-weight: 800;
   flex-shrink: 0;
 }
+.hintora-logo-mark .hintora-pointer-icon { width: 11px; height: 11px; }
+.hintora-pointer-icon { display: block; }
 .hintora-panel-header-title { flex: 1; }
 .hintora-icon-btn {
   background: none;

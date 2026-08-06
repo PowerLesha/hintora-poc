@@ -1,7 +1,8 @@
-// Draws a rounded-square "H" badge for the toolbar button at runtime
-// instead of shipping PNG assets. No image tooling required, and a
-// squircle with a diagonal gradient reads as a deliberate mark rather than
-// a placeholder, unlike a flat circle.
+// Draws a squircle badge with a cursor/pointer glyph for the toolbar
+// button at runtime instead of shipping PNG assets. A single capital
+// letter on a gradient badge reads as a generic account avatar, not a
+// product mark, so the glyph is a pointer instead: the extension's whole
+// job is pointing at the right element on the page.
 function drawIcon(size: number): ImageData {
   const canvas = new OffscreenCanvas(size, size);
   const ctx = canvas.getContext("2d")!;
@@ -27,29 +28,27 @@ function drawIcon(size: number): ImageData {
   ctx.fillStyle = sheen;
   ctx.fill();
 
+  // Classic four-point cursor/arrow silhouette, normalized to a unit box
+  // (tip at the origin corner) so it can be scaled and centered at any
+  // icon size without redoing the geometry.
+  const glyph = size * 0.5;
+  const ox = (size - glyph) / 2;
+  const oy = (size - glyph) / 2;
+  const pt = (nx: number, ny: number): [number, number] => [ox + nx * glyph, oy + ny * glyph];
+
+  ctx.save();
+  ctx.shadowColor = "rgba(20, 10, 55, 0.35)";
+  ctx.shadowBlur = size * 0.06;
+  ctx.shadowOffsetY = size * 0.025;
+  ctx.beginPath();
+  ctx.moveTo(...pt(0, 0));
+  ctx.lineTo(...pt(0.4167, 1.0));
+  ctx.lineTo(...pt(0.5645, 0.5645));
+  ctx.lineTo(...pt(1.0, 0.4167));
+  ctx.closePath();
   ctx.fillStyle = "#ffffff";
-  ctx.font = `700 ${Math.round(size * 0.54)}px Arial, sans-serif`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("H", size / 2, size / 2 + size * 0.03);
-
-  // A small accent dot, standing in for "the thing being pointed at" —
-  // only drawn at sizes where it stays crisp instead of turning to mud.
-  if (size >= 32) {
-    const cx = size * 0.78;
-    const cy = size * 0.78;
-    ctx.save();
-    ctx.globalCompositeOperation = "destination-out";
-    ctx.beginPath();
-    ctx.arc(cx, cy, size * 0.16, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-
-    ctx.beginPath();
-    ctx.arc(cx, cy, size * 0.12, 0, Math.PI * 2);
-    ctx.fillStyle = "#ffb457";
-    ctx.fill();
-  }
+  ctx.fill();
+  ctx.restore();
 
   return ctx.getImageData(0, 0, size, size);
 }
