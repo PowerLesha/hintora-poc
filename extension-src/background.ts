@@ -1,21 +1,56 @@
-// Draws a purple "H" badge for the toolbar button at runtime instead of
-// shipping PNG assets. No image tooling required, and it stands out among
-// a toolbar full of generic gray extension icons.
+// Draws a rounded-square "H" badge for the toolbar button at runtime
+// instead of shipping PNG assets. No image tooling required, and a
+// squircle with a diagonal gradient reads as a deliberate mark rather than
+// a placeholder, unlike a flat circle.
 function drawIcon(size: number): ImageData {
   const canvas = new OffscreenCanvas(size, size);
   const ctx = canvas.getContext("2d")!;
-  const grad = ctx.createLinearGradient(0, 0, size, size);
-  grad.addColorStop(0, "#6d5bff");
-  grad.addColorStop(1, "#a084ff");
-  ctx.fillStyle = grad;
+  const radius = size * 0.26;
+
+  const base = ctx.createLinearGradient(0, 0, size, size);
+  base.addColorStop(0, "#5b3df0");
+  base.addColorStop(1, "#8b6bff");
+  ctx.fillStyle = base;
   ctx.beginPath();
-  ctx.arc(size / 2, size / 2, size / 2, 0, Math.PI * 2);
+  ctx.roundRect(0, 0, size, size, radius);
   ctx.fill();
+
+  // Soft sheen toward the top-left for a bit of depth, instead of a flat fill.
+  const sheen = ctx.createRadialGradient(
+    size * 0.32, size * 0.24, 0,
+    size * 0.32, size * 0.24, size * 0.75
+  );
+  sheen.addColorStop(0, "rgba(255,255,255,0.25)");
+  sheen.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.beginPath();
+  ctx.roundRect(0, 0, size, size, radius);
+  ctx.fillStyle = sheen;
+  ctx.fill();
+
   ctx.fillStyle = "#ffffff";
-  ctx.font = `bold ${Math.round(size * 0.62)}px Arial, sans-serif`;
+  ctx.font = `700 ${Math.round(size * 0.54)}px Arial, sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText("H", size / 2, size / 2 + size * 0.03);
+
+  // A small accent dot, standing in for "the thing being pointed at" —
+  // only drawn at sizes where it stays crisp instead of turning to mud.
+  if (size >= 32) {
+    const cx = size * 0.78;
+    const cy = size * 0.78;
+    ctx.save();
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.16, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.12, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffb457";
+    ctx.fill();
+  }
+
   return ctx.getImageData(0, 0, size, size);
 }
 

@@ -305,6 +305,9 @@
 
   // content.ts
   var CONFIDENCE_THRESHOLD = 2;
+  var CLOSE_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3l10 10M13 3L3 13"/></svg>`;
+  var CHECK_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3.2L13 4.5"/></svg>`;
+  var CROSS_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>`;
   var WORKFLOWS = [
     {
       id: "download-zip",
@@ -358,8 +361,9 @@
     panel.className = "hintora-panel hintora-hidden";
     panel.innerHTML = `
     <div class="hintora-panel-header">
-      <span>Ask Hintora</span>
-      <button type="button" data-close aria-label="Close">\u2715</button>
+      <div class="hintora-logo-mark">H</div>
+      <span class="hintora-panel-header-title">Ask Hintora</span>
+      <button type="button" class="hintora-icon-btn" data-close aria-label="Close">${CLOSE_ICON}</button>
     </div>
     <div class="hintora-panel-body">
       <div class="hintora-input-row">
@@ -444,16 +448,18 @@
     feedbackEl.appendChild(label);
     const yes = document.createElement("button");
     yes.type = "button";
-    yes.className = "hintora-fb-btn";
-    yes.textContent = "\u{1F44D}";
+    yes.className = "hintora-fb-btn hintora-fb-up";
+    yes.setAttribute("aria-label", "Correct");
+    yes.innerHTML = CHECK_ICON;
     yes.addEventListener("click", () => {
       logResolution(query, top.name, top.score, true);
       feedbackEl.textContent = "Thanks \u2014 remembered for next time on this site.";
     });
     const no = document.createElement("button");
     no.type = "button";
-    no.className = "hintora-fb-btn";
-    no.textContent = "\u{1F44E}";
+    no.className = "hintora-fb-btn hintora-fb-down";
+    no.setAttribute("aria-label", "Wrong");
+    no.innerHTML = CROSS_ICON;
     no.addEventListener("click", () => {
       logResolution(query, top.name, top.score, false);
       feedbackEl.textContent = "Noted \u2014 won't be reinforced.";
