@@ -91,13 +91,22 @@ window.__hintora = window.__hintora || {};
    */
   function scan(root) {
     const scope = root || document;
-    const nodes = Array.from(scope.querySelectorAll(INTERACTIVE_SELECTOR));
+    const nodes = Array.from(scope.querySelectorAll(INTERACTIVE_SELECTOR)).filter(
+      (el) => !el.closest("#hintora-root") // never target our own widget
+    );
     const seen = new Set();
     const candidates = [];
 
     for (const el of nodes) {
       if (seen.has(el) || !isVisible(el)) continue;
-      if (el.closest("#hintora-root")) continue; // never target our own widget
+      // Some layout wrappers pick up an interactive-looking attribute (a
+      // stray tabindex/role) even though they just group several *other*
+      // real controls (e.g. a repo header toolbar wrapping Watch/Fork/Star/
+      // Code). Their innerText fallback then swallows all of those
+      // children's labels into one garbled name. A real leaf control
+      // shouldn't itself contain another interactive control, so skip any
+      // element that does.
+      if (nodes.some((other) => other !== el && el.contains(other))) continue;
       seen.add(el);
       const name = getAccessibleName(el);
       candidates.push({
