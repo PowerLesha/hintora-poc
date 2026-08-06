@@ -1,8 +1,11 @@
-// Draws a squircle badge with a cursor/pointer glyph for the toolbar
-// button at runtime instead of shipping PNG assets. A single capital
-// letter on a gradient badge reads as a generic account avatar, not a
-// product mark, so the glyph is a pointer instead: the extension's whole
-// job is pointing at the right element on the page.
+// Draws a squircle badge with a viewfinder/focus-brackets glyph for the
+// toolbar button at runtime instead of shipping PNG assets. A single
+// capital letter on a gradient badge reads as a generic account avatar,
+// and a diagonal dart shape reads as a paper-plane (Telegram et al.), so
+// the mark is four corner brackets around a dot instead: this is the same
+// motif the overlay itself draws around a resolved element (see
+// widget.css's .hintora-spotlight), so the icon shows what the product
+// actually does rather than a generic arrow.
 function drawIcon(size: number): ImageData {
   const canvas = new OffscreenCanvas(size, size);
   const ctx = canvas.getContext("2d")!;
@@ -28,27 +31,49 @@ function drawIcon(size: number): ImageData {
   ctx.fillStyle = sheen;
   ctx.fill();
 
-  // Classic four-point cursor/arrow silhouette, normalized to a unit box
-  // (tip at the origin corner) so it can be scaled and centered at any
-  // icon size without redoing the geometry.
-  const glyph = size * 0.5;
-  const ox = (size - glyph) / 2;
-  const oy = (size - glyph) / 2;
-  const pt = (nx: number, ny: number): [number, number] => [ox + nx * glyph, oy + ny * glyph];
+  const box = size * 0.56;
+  const ox = (size - box) / 2;
+  const oy = (size - box) / 2;
+  const arm = box * 0.4;
+  const lineWidth = Math.max(1.4, size * 0.075);
 
   ctx.save();
-  ctx.shadowColor = "rgba(20, 10, 55, 0.35)";
-  ctx.shadowBlur = size * 0.06;
-  ctx.shadowOffsetY = size * 0.025;
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+
   ctx.beginPath();
-  ctx.moveTo(...pt(0, 0));
-  ctx.lineTo(...pt(0.4167, 1.0));
-  ctx.lineTo(...pt(0.5645, 0.5645));
-  ctx.lineTo(...pt(1.0, 0.4167));
-  ctx.closePath();
-  ctx.fillStyle = "#ffffff";
-  ctx.fill();
+  ctx.moveTo(ox, oy + arm);
+  ctx.lineTo(ox, oy);
+  ctx.lineTo(ox + arm, oy);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(ox + box - arm, oy);
+  ctx.lineTo(ox + box, oy);
+  ctx.lineTo(ox + box, oy + arm);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(ox, oy + box - arm);
+  ctx.lineTo(ox, oy + box);
+  ctx.lineTo(ox + arm, oy + box);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(ox + box - arm, oy + box);
+  ctx.lineTo(ox + box, oy + box);
+  ctx.lineTo(ox + box, oy + box - arm);
+  ctx.stroke();
   ctx.restore();
+
+  if (size >= 24) {
+    ctx.beginPath();
+    ctx.arc(ox + box / 2, oy + box / 2, size * 0.05, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffb457";
+    ctx.fill();
+  }
 
   return ctx.getImageData(0, 0, size, size);
 }

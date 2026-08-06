@@ -88,7 +88,7 @@
   transition: transform 0.15s ease, box-shadow 0.15s ease;
   animation: hintora-bubble-intro 1.6s cubic-bezier(0.4, 0, 0.2, 1) 1;
 }
-.hintora-bubble .hintora-pointer-icon { width: 22px; height: 22px; }
+.hintora-bubble .hintora-mark-icon { width: 24px; height: 24px; }
 .hintora-bubble:hover {
   transform: translateY(-2px) scale(1.03);
   box-shadow: 0 10px 28px rgba(91, 61, 240, 0.55);
@@ -141,8 +141,8 @@
   justify-content: center;
   flex-shrink: 0;
 }
-.hintora-logo-mark .hintora-pointer-icon { width: 11px; height: 11px; }
-.hintora-pointer-icon { display: block; }
+.hintora-logo-mark .hintora-mark-icon { width: 12px; height: 12px; }
+.hintora-mark-icon { display: block; }
 .hintora-panel-header-title { flex: 1; }
 .hintora-icon-btn {
   background: none;

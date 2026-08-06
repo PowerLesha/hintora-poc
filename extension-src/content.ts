@@ -14,10 +14,11 @@ const CONFIDENCE_THRESHOLD = 2; // below this, admit uncertainty instead of gues
 
 // Small inline icon set (stroke-based, single weight) so the widget doesn't
 // mix emoji rendering (which varies by OS) with hand-drawn glyphs.
-// Same cursor silhouette as the toolbar icon (background.ts's drawIcon),
-// used instead of a lettermark: a colored badge with a single capital
-// letter reads as a generic account avatar, not a product mark.
-const POINTER_ICON = `<svg class="hintora-pointer-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 3L10.07 19.97L12.58 12.58L19.97 10.07Z"/></svg>`;
+// Same viewfinder-brackets mark as the toolbar icon (background.ts's
+// drawIcon): four corner brackets around a dot, the same motif the overlay
+// itself draws around a resolved element, instead of a lettermark or a
+// generic arrow glyph.
+const MARK_ICON = `<svg class="hintora-mark-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10V4H10"/><path d="M14 4H20V10"/><path d="M4 14V20H10"/><path d="M20 14V20H14"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>`;
 const CLOSE_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3l10 10M13 3L3 13"/></svg>`;
 const CHECK_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3.2L13 4.5"/></svg>`;
 const CROSS_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>`;
@@ -94,14 +95,14 @@ function buildWidget(): void {
 
   bubble = document.createElement("button");
   bubble.className = "hintora-bubble";
-  bubble.innerHTML = POINTER_ICON;
+  bubble.innerHTML = MARK_ICON;
   bubble.title = "Ask Hintora";
 
   panel = document.createElement("div");
   panel.className = "hintora-panel hintora-hidden";
   panel.innerHTML = `
     <div class="hintora-panel-header">
-      <div class="hintora-logo-mark">${POINTER_ICON}</div>
+      <div class="hintora-logo-mark">${MARK_ICON}</div>
       <span class="hintora-panel-header-title">Ask Hintora</span>
       <button type="button" class="hintora-icon-btn" data-close aria-label="Close">${CLOSE_ICON}</button>
     </div>
