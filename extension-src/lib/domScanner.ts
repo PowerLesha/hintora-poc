@@ -1,7 +1,7 @@
-// DOM "understanding" layer.
-// Goal: turn the live page into a flat list of candidate targets, each with a
-// human-readable name, the way a screen reader would see it — not raw CSS
-// selectors, which break the moment a class name changes.
+// DOM understanding layer. Turns the live page into a flat list of
+// candidate targets, each with a name computed the way a screen reader
+// would read it, instead of a CSS selector that breaks the moment a class
+// name changes.
 import type { Candidate } from "../types";
 
 const INTERACTIVE_SELECTOR = [
@@ -72,9 +72,9 @@ function getAccessibleName(el: HTMLElement): string {
     if (altText) return altText;
   }
 
-  // Icon-only control with no name we could recover — still a candidate,
-  // just a weak one (name-less controls are exactly the reliability risk
-  // called out in the brief).
+  // Icon-only control with no recoverable name. Still returned as a
+  // candidate, just a weak one: unlabeled controls are a real reliability
+  // risk, not something to quietly filter out.
   return "";
 }
 
@@ -92,26 +92,25 @@ function getRole(el: HTMLElement): string {
 }
 
 /**
- * @param root scan scope — defaults to the whole document, but callers can
- *   pass a just-opened menu/dialog to search only inside it.
+ * @param root Scan scope. Defaults to the whole document; callers can pass
+ *   a just-opened menu or dialog to search only inside it.
  */
 export function scan(root?: ParentNode): Candidate[] {
   const scope = root || document;
   const nodes = Array.from(scope.querySelectorAll<HTMLElement>(INTERACTIVE_SELECTOR)).filter(
-    (el) => !el.closest("#hintora-root") // never target our own widget
+    (el) => !el.closest("#hintora-root") // skip the widget's own UI
   );
   const seen = new Set<HTMLElement>();
   const candidates: Candidate[] = [];
 
   for (const el of nodes) {
     if (seen.has(el) || !isVisible(el)) continue;
-    // Some layout wrappers pick up an interactive-looking attribute (a
-    // stray tabindex/role) even though they just group several *other*
-    // real controls (e.g. a repo header toolbar wrapping Watch/Fork/Star/
-    // Code). Their innerText fallback then swallows all of those
-    // children's labels into one garbled name. A real leaf control
-    // shouldn't itself contain another interactive control, so skip any
-    // element that does.
+    // Layout wrappers sometimes carry a stray tabindex/role and match the
+    // selector even though they just contain several other real controls
+    // (GitHub's repo header wraps Watch/Fork/Star/Code this way). Their
+    // innerText fallback then swallows every child's label into one
+    // garbled name. A real leaf control doesn't nest another interactive
+    // control, so skip any matched element that contains another one.
     if (nodes.some((other) => other !== el && el.contains(other))) continue;
     seen.add(el);
     candidates.push({

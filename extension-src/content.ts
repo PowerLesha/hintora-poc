@@ -1,9 +1,9 @@
 // Orchestrates the widget UI and wires scanner -> matcher -> overlay
 // together, plus the optional reliability loop: on load it asks the local
 // backend (see /backend) for past confirmed matches on this hostname, folds
-// them into scoring, and reports back new confirmations/corrections. If the
-// backend isn't running, all of that just silently no-ops — the extension
-// works exactly as it did with only the static per-site hints.
+// them into scoring, and reports new confirmations/corrections back. If the
+// backend isn't running, all of that no-ops silently and the extension
+// falls back to the static per-site hints only.
 import { scan } from "./lib/domScanner";
 import { match, tokenize } from "./lib/matcher";
 import { boostFor, examplesFor } from "./lib/siteHints";
@@ -18,10 +18,10 @@ interface Workflow {
   findNextStep: () => Candidate | undefined;
 }
 
-// A tiny illustration of "workflow steps", not just single clicks: once
-// step 1 is resolved AND actually clicked by the user, look for step 2
+// A small illustration of workflow steps rather than single clicks: once
+// step 1 is resolved and actually clicked by the user, look for step 2
 // inside whatever just appeared. A real version would store this as a
-// small step-graph per intent instead of one hardcoded rule.
+// step-graph per intent instead of one hardcoded rule.
 const WORKFLOWS: Workflow[] = [
   {
     id: "download-zip",
@@ -151,11 +151,11 @@ function renderChips(examples: string[]): void {
 }
 
 // Unlike renderChips(examples), each chip here is bound to a specific
-// already-scored candidate, not re-typed as text — clicking one highlights
-// that exact element directly and logs it as a correction against the
-// ORIGINAL query, rather than re-running the matcher on the button's own
-// label (which could match a different element of the same name, or fail
-// the confidence threshold on its own).
+// already-scored candidate rather than plain text. Clicking one highlights
+// that exact element and logs it as a correction against the original
+// query, instead of re-running the matcher on the button's own label,
+// which could match a different element with the same name or fail the
+// confidence threshold on its own.
 function renderAlternativeChips(originalQuery: string, alternatives: RankedCandidate[]): void {
   chipsEl.innerHTML = "";
   for (const alt of alternatives) {

@@ -70,7 +70,7 @@
     const scope = root2 || document;
     const nodes = Array.from(scope.querySelectorAll(INTERACTIVE_SELECTOR)).filter(
       (el) => !el.closest("#hintora-root")
-      // never target our own widget
+      // skip the widget's own UI
     );
     const seen = /* @__PURE__ */ new Set();
     const candidates = [];

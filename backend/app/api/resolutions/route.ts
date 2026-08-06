@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 
-// Permissive CORS: this is a local-only demo backend, never meant to be
-// deployed/exposed. In production this would be scoped to the customer's
-// own domains, same as any embeddable SDK's API.
+// Permissive CORS: this is a local-only demo backend, not meant to be
+// deployed or exposed. In production this would be scoped to the
+// customer's own domains, like any embeddable SDK's API.
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
@@ -30,10 +30,10 @@ export async function GET(request: NextRequest) {
   }
 
   const db = getDb();
-  // One row per distinct (query, matched control) pair that's ever been
-  // confirmed for this host, most-repeated first — this is the whole
-  // "gets more reliable with usage" mechanism: it's what the extension
-  // merges into its scoring on the next similar query.
+  // One row per distinct (query, matched control) pair confirmed for this
+  // host, most-repeated first. The extension merges these into its scoring
+  // on the next similar query, which is the whole "gets more reliable with
+  // usage" mechanism.
   const rows = db
     .prepare(
       `SELECT query, matched_name as matchedName, MAX(score) as score, COUNT(*) as confirmations

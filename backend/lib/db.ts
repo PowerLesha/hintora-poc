@@ -1,9 +1,9 @@
 import Database from "better-sqlite3";
 import path from "node:path";
 
-// SQLite stands in for Postgres/Supabase here specifically so this demo
-// needs zero signup, zero deployment, and zero cost — swap this file for a
-// pooled pg client and nothing else in the API routes would need to change.
+// SQLite stands in for Postgres/Supabase so this demo needs no signup,
+// deployment, or cost. Swap this file for a pooled pg client and nothing
+// else in the API routes needs to change.
 const dbPath = path.join(process.cwd(), "data.db");
 
 declare global {

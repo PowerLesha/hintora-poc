@@ -1,6 +1,6 @@
-// Draw a purple "H" badge for the toolbar button at runtime instead of
-// shipping PNG assets — no image tooling required, and it makes the button
-// obvious among a toolbar full of generic gray extension icons.
+// Draws a purple "H" badge for the toolbar button at runtime instead of
+// shipping PNG assets. No image tooling required, and it stands out among
+// a toolbar full of generic gray extension icons.
 function drawIcon(size: number): ImageData {
   const canvas = new OffscreenCanvas(size, size);
   const ctx = canvas.getContext("2d")!;
@@ -25,7 +25,7 @@ async function setActionIcon(): Promise<void> {
     for (const size of [16, 32, 48, 128]) imageData[size] = drawIcon(size);
     await chrome.action.setIcon({ imageData });
   } catch {
-    // OffscreenCanvas unavailable — toolbar keeps the generic default icon.
+    // OffscreenCanvas unavailable; toolbar keeps the generic default icon.
   }
 }
 setActionIcon();
@@ -44,11 +44,11 @@ chrome.action.onClicked.addListener((tab) => {
 
 // Optional local backend (see /backend) that persists confirmed matches per
 // site, so the matcher gets sharper with real usage instead of resetting
-// every session. This fetch runs from the background service worker, not
-// content.js: a content script's network requests are subject to the HOST
-// PAGE's CSP (github.com's connect-src almost certainly doesn't allow
-// localhost), while a service worker with host_permissions for this origin
-// is exempt from the page's CSP entirely. This relay is the whole reason
+// every session. The fetch runs here, in the service worker, rather than
+// in content.ts: a content script's network requests are subject to the
+// host page's CSP, and github.com's connect-src almost certainly doesn't
+// allow localhost. A service worker with host_permissions for this origin
+// is exempt from the page's CSP, which is why this relay exists and why
 // that permission is declared in manifest.json.
 const BACKEND_URL = "http://localhost:3000";
 const BACKEND_TIMEOUT_MS = 2000;
@@ -61,7 +61,7 @@ async function backendFetch(path: string, options?: RequestInit): Promise<unknow
     if (!res.ok) return null;
     return await res.json();
   } catch {
-    return null; // backend not running / unreachable — treated as "no data available"
+    return null; // backend not running or unreachable, treated as "no data available"
   } finally {
     clearTimeout(timer);
   }

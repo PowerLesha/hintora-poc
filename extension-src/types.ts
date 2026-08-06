@@ -11,7 +11,7 @@ export interface RankedCandidate extends Candidate {
 
 export type BoostFn = (queryTokens: Set<string>, candidate: Candidate) => number;
 
-// One row of the backend's GET /api/resolutions response — a past
+// One row of the backend's GET /api/resolutions response: a past
 // (query, matched control) pair confirmed enough times to be worth
 // reinforcing on this hostname. See backend/app/api/resolutions/route.ts.
 export interface DynamicHint {

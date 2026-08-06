@@ -1,9 +1,8 @@
-// Per-site tuning. The matcher works on ANY page with zero configuration —
-// this file is the "learn a site over time" story: once Hintora has seen a
-// site enough times (or a customer has configured it), small boosts push the
-// generic heuristic toward the answers we already know are right, without
-// hardcoding brittle CSS selectors. dynamicBoost in content.ts is the same
-// idea sourced from the backend instead of hardcoded here.
+// Per-site tuning. The matcher already works on any page with zero
+// configuration; these boosts push the generic heuristic toward answers
+// already known to be right for a specific site, without hardcoding a
+// brittle CSS selector. dynamicBoost in content.ts does the same thing
+// sourced from the backend instead of hardcoded here.
 import type { BoostFn } from "../types";
 
 interface HintRule {

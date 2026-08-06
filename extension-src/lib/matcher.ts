@@ -1,10 +1,9 @@
-// "Intent understanding" layer — stands in for the real AI backend.
-// Deliberately not an LLM call: tokenize the user's question, expand with a
-// small synonym table, and score it against each candidate element's
-// accessible name. This is the part a real product would replace with an
-// embedding/LLM call over the accessibility tree — the interface below
-// (query, candidates) -> ranked matches is exactly what that swap would slot
-// into.
+// Intent understanding layer. Stands in for the real AI backend: tokenizes
+// the question, expands it with a small synonym table, and scores each
+// candidate's accessible name against that. A real product would replace
+// this with an embedding or LLM call over the accessibility tree; the
+// (query, candidates) -> ranked matches signature is the seam that swap
+// would slot into.
 import type { BoostFn, Candidate, RankedCandidate } from "../types";
 
 const STOPWORDS = new Set([
@@ -68,15 +67,14 @@ export function match(
 ): RankedCandidate[] {
   const queryTokens = expand(tokenize(query));
   const results: RankedCandidate[] = candidates.map((c) => {
-    // Deliberately NOT expanded with synonyms: a button literally named
-    // "Report repository" contains the word "report", which would
-    // otherwise pull in unrelated words from the whole report/flag/issue/
-    // bug/problem group and make it look like a strong match for "how do
-    // I report a bug" — beating the real answer (the Issues tab, whose
-    // literal name doesn't contain "report" at all). Expanding only the
-    // user's side keeps the widening one-directional: we're generous
-    // about how the user might phrase their intent, not about what a
-    // button's own label secretly "means".
+    // Candidate names are NOT synonym-expanded, only the query is. A button
+    // literally named "Report repository" contains the word "report",
+    // which under symmetric expansion pulled in the rest of the
+    // report/flag/issue/bug/problem group and outscored the real answer to
+    // "how do I report a bug" (the Issues tab, whose label doesn't contain
+    // "report" at all). Expanding only the query side widens how the user
+    // might phrase their intent without also widening what a button's own
+    // label is assumed to mean.
     const nameTokens = new Set(tokenize(c.name));
     let overlap = 0;
     for (const t of queryTokens) if (nameTokens.has(t)) overlap += 1;
@@ -88,7 +86,7 @@ export function match(
 
     let score = overlap * 2 + (substringHit ? 1 : 0);
     score *= ROLE_WEIGHT[c.role] ?? 1;
-    if (!c.name) score -= 0.5; // unlabeled controls are a reliability risk — penalize, don't exclude
+    if (!c.name) score -= 0.5; // unlabeled controls are penalized, not excluded
 
     if (siteBoost) score += siteBoost(queryTokens, c) || 0;
 

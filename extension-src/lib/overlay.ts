@@ -1,7 +1,7 @@
-// Renders the spotlight + callout for a resolved target, and keeps it glued
-// to the element as the page moves under it (scroll, resize, re-layout) —
-// and notices if the element disappears entirely, which is the main failure
-// mode of "just remember a CSS selector" approaches.
+// Renders the spotlight and callout for a resolved target, keeps them glued
+// to the element as the page moves under it (scroll, resize, re-layout),
+// and notices if the element disappears entirely. That last case is the
+// main failure mode of approaches that just remember a CSS selector.
 
 interface ShowOptions {
   el: HTMLElement;
@@ -71,12 +71,11 @@ function lostTarget(): void {
   hide();
 }
 
-// Tears down whatever the *previous* show() set up. Without this, calling
-// show() again (e.g. advancing to step 2 of a workflow) leaked the old
-// interval/observer/listeners, which piled up across every query in a
-// session — harmless individually, but each leaked MutationObserver kept
-// firing on every DOM mutation on the page for as long as the tab stayed
-// open.
+// Tears down whatever the previous show() call set up. Without this,
+// calling show() again (e.g. advancing to step 2 of a workflow) left the
+// old interval/observer/listeners running: harmless individually, but each
+// leaked MutationObserver kept firing on every DOM mutation on the page for
+// as long as the tab stayed open.
 function stopTracking(): void {
   window.removeEventListener("scroll", place, { capture: true });
   window.removeEventListener("resize", place);
@@ -95,8 +94,8 @@ function show({ el, message, onLost }: ShowOptions): void {
   box!.style.display = "block";
   callout!.style.display = "block";
   el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
-  // scrollIntoView is async/animated — placing once immediately then again
-  // shortly after covers both the pre- and post-scroll position.
+  // scrollIntoView animates asynchronously, so place once immediately and
+  // again shortly after to cover both the pre- and post-scroll position.
   place();
   setTimeout(place, 350);
 

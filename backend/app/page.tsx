@@ -20,11 +20,10 @@ export default function Page() {
     <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
       <h1>Hintora — confirmed resolutions</h1>
       <p style={{ opacity: 0.75, lineHeight: 1.5 }}>
-        Every row here is a query the extension resolved and the user confirmed (👍) or corrected
-        (picked a &quot;did you mean&quot; alternative). <code>GET /api/resolutions?hostname=...</code>{" "}
+        Each row is a query the extension resolved and the user confirmed (👍) or corrected (picked
+        a &quot;did you mean&quot; alternative). <code>GET /api/resolutions?hostname=...</code>{" "}
         turns confirmed rows into score boosts the matcher applies on the next similar query on that
-        site — this is the extension&apos;s &quot;gets more reliable with usage&quot; idea, made real
-        instead of just described.
+        site.
       </p>
       <table style={{ width: "100%", borderCollapse: "collapse", marginTop: 16, fontSize: 14 }}>
         <thead>

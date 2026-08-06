@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 export const metadata = {
   title: "Hintora PoC — Reliability Store",
-  description: "Confirmed guidance resolutions — the persistence side of the extension's reliability story.",
+  description: "Confirmed guidance resolutions, the persistence side of the extension's reliability story.",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
