@@ -1,24 +1,19 @@
 {
   "manifest_version": 3,
   "name": "Hintora PoC — Browser Guidance Overlay",
-  "version": "0.1.0",
-  "description": "Proof of concept: click the toolbar icon, ask what you want to do, and an in-page overlay points at the real element to click — no backend, no LLM call.",
+  "version": "0.2.0",
+  "description": "Proof of concept: click the toolbar icon, ask what you want to do, and an in-page overlay points at the real element to click.",
   "action": {
     "default_title": "Toggle Hintora guidance"
   },
   "background": {
     "service_worker": "background.js"
   },
+  "host_permissions": ["http://localhost:3000/*"],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": [
-        "lib/domScanner.js",
-        "lib/matcher.js",
-        "lib/siteHints.js",
-        "lib/overlay.js",
-        "content.js"
-      ],
+      "js": ["content.js"],
       "css": ["widget.css"],
       "run_at": "document_idle"
     }
