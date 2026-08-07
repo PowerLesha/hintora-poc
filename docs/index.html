@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hintora PoC — browser-first guidance overlay</title>
+<meta name="description" content="A Chrome extension that reads a page's DOM and turns a plain-English question into a spotlighted button, with a small backend that makes it more reliable over time.">
+<style>
+  :root {
+    --accent-1: #5b3df0;
+    --accent-2: #8b6bff;
+    --accent-solid: #6d5bff;
+    --bg: #0e0c1a;
+    --bg-panel: #15122a;
+    --bg-panel-2: #1a1733;
+    --border: rgba(255,255,255,0.09);
+    --text: #f4f2ff;
+    --text-dim: #b3aed6;
+    --text-dimmer: #7a749e;
+    --radius-lg: 20px;
+    --radius-md: 14px;
+    --radius-sm: 10px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    background-image:
+      radial-gradient(600px 400px at 12% -10%, rgba(91,61,240,0.28), transparent),
+      radial-gradient(500px 380px at 100% 0%, rgba(139,107,255,0.16), transparent);
+    color: var(--text);
+    font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 24px; }
+
+  header.nav {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 22px 0;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; letter-spacing: 0.01em; }
+  .brand-mark {
+    width: 30px; height: 30px; border-radius: 9px; flex-shrink: 0;
+    background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 6px 18px rgba(91,61,240,0.4);
+  }
+  .brand-mark svg { width: 17px; height: 17px; }
+  .nav-link {
+    text-decoration: none; font-size: 14px; color: var(--text-dim);
+    display: flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border); border-radius: 999px; padding: 7px 14px;
+    transition: border-color .15s ease, color .15s ease;
+  }
+  .nav-link:hover { border-color: var(--accent-solid); color: var(--text); }
+
+  .hero { padding: 56px 0 40px; text-align: center; }
+  .eyebrow {
+    display: inline-block; font-size: 12px; font-weight: 600; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #cfc9ff; background: rgba(109,91,255,0.14);
+    border: 1px solid var(--border); border-radius: 999px; padding: 5px 14px; margin-bottom: 22px;
+  }
+  h1 { font-size: 40px; line-height: 1.18; margin: 0 0 18px; letter-spacing: -0.01em; }
+  .hero p.lede {
+    max-width: 620px; margin: 0 auto 30px; color: var(--text-dim); font-size: 17px;
+  }
+  .cta-row { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 8px;
+    text-decoration: none; font-weight: 600; font-size: 14.5px;
+    padding: 12px 22px; border-radius: var(--radius-sm);
+    transition: filter .15s ease, transform .1s ease, background .15s ease, border-color .15s ease;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary {
+    background: linear-gradient(135deg, var(--accent-1), var(--accent-2)); color: #fff;
+    box-shadow: 0 10px 26px rgba(91,61,240,0.4);
+  }
+  .btn-primary:hover { filter: brightness(1.08); }
+  .btn-secondary {
+    background: rgba(255,255,255,0.04); color: var(--text); border: 1px solid var(--border);
+  }
+  .btn-secondary:hover { border-color: var(--accent-solid); }
+
+  section { padding: 46px 0; border-top: 1px solid var(--border); }
+  section.hero { border-top: none; }
+  h2 { font-size: 24px; margin: 0 0 8px; }
+  .section-sub { color: var(--text-dim); margin: 0 0 28px; max-width: 560px; }
+
+  .video-frame {
+    border-radius: var(--radius-lg); overflow: hidden; border: 1px solid var(--border);
+    background: var(--bg-panel); box-shadow: 0 30px 70px rgba(0,0,0,0.45);
+  }
+  .video-frame video { display: block; width: 100%; background: #000; }
+  .video-caption { text-align: center; color: var(--text-dimmer); font-size: 13.5px; margin-top: 14px; }
+
+  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .card {
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 20px;
+  }
+  .card-icon {
+    width: 34px; height: 34px; border-radius: 10px; margin-bottom: 14px;
+    background: rgba(109,91,255,0.14); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center; color: #cfc9ff;
+  }
+  .card-icon svg { width: 18px; height: 18px; }
+  .card h3 { font-size: 15.5px; margin: 0 0 8px; }
+  .card p { font-size: 13.5px; color: var(--text-dim); margin: 0 0 8px; }
+  .card code { font-size: 12px; color: #cfc9ff; background: rgba(255,255,255,0.05); padding: 2px 6px; border-radius: 6px; }
+
+  .callout {
+    background: var(--bg-panel-2); border: 1px solid rgba(139,107,255,0.3); border-radius: var(--radius-md);
+    padding: 22px 24px; position: relative;
+  }
+  .callout::before {
+    content: "MULTI-STEP EXAMPLE"; position: absolute; top: -10px; left: 22px;
+    background: var(--accent-solid); color: #fff; font-size: 10.5px; font-weight: 700;
+    letter-spacing: 0.06em; padding: 3px 10px; border-radius: 999px;
+  }
+  .callout p { margin: 10px 0 0; color: var(--text-dim); font-size: 14.5px; }
+  .callout p:first-of-type { margin-top: 6px; }
+  .callout strong { color: var(--text); }
+
+  table.mapping { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.mapping td { padding: 12px 0; border-top: 1px solid var(--border); vertical-align: top; }
+  table.mapping td:first-child { color: var(--text-dim); width: 40%; padding-right: 20px; }
+  table.mapping code { font-size: 12.5px; color: #cfc9ff; }
+
+  .steps { padding: 0; margin: 0; list-style: none; counter-reset: step; }
+  .steps li {
+    counter-increment: step; position: relative; padding: 4px 0 4px 38px; margin-bottom: 14px;
+    color: var(--text-dim); font-size: 14.5px;
+  }
+  .steps li::before {
+    content: counter(step); position: absolute; left: 0; top: 2px;
+    width: 24px; height: 24px; border-radius: 8px; background: rgba(109,91,255,0.16);
+    border: 1px solid var(--border); color: #cfc9ff; font-size: 12px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .steps li code { font-size: 12.5px; color: var(--text); background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 6px; }
+  .steps strong { color: var(--text); }
+
+  footer { padding: 40px 0 60px; color: var(--text-dimmer); font-size: 13.5px; text-align: center; }
+  footer a { color: #cfc9ff; text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+
+  @media (max-width: 720px) {
+    .cards { grid-template-columns: 1fr; }
+    h1 { font-size: 30px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header class="nav">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10V4H10"/><path d="M14 4H20V10"/><path d="M4 14V20H10"/><path d="M20 14V20H14"/><circle cx="12" cy="12" r="1.6" fill="white" stroke="none"/></svg>
+      </div>
+      hintora poc
+    </div>
+    <a class="nav-link" href="https://github.com/PowerLesha/hintora-poc" target="_blank" rel="noopener">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      View source
+    </a>
+  </header>
+
+  <section class="hero">
+    <span class="eyebrow">Hintora founding-engineer PoC</span>
+    <h1>It reads the page like a screen reader would — then shows you where to click.</h1>
+    <p class="lede">
+      A small Chrome extension: ask it what you're trying to do, and it finds the real
+      element on the page and spotlights it. A local backend logs which matches get
+      confirmed, so it gets sharper the more it's used. No signup, no deployment,
+      runs entirely on your own machine.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="https://github.com/PowerLesha/hintora-poc" target="_blank" rel="noopener">View on GitHub</a>
+      <a class="btn btn-secondary" href="#demo">Watch the demo ↓</a>
+    </div>
+  </section>
+
+  <section id="demo">
+    <h2>Watch it work</h2>
+    <p class="section-sub">A minute and a half on a live GitHub repo page — no cuts, no staging.</p>
+    <div class="video-frame">
+      <video controls preload="metadata" poster="assets/demo-poster.png">
+        <source src="assets/demo.mp4" type="video/mp4">
+      </video>
+    </div>
+    <p class="video-caption">Download flow (2-step), a low-confidence fallback, and the reliability loop confirming into the local dashboard.</p>
+  </section>
+
+  <section id="how">
+    <h2>How it works</h2>
+    <p class="section-sub">Three pieces, each mapped to a real seam in the actual product.</p>
+    <div class="cards">
+      <div class="card">
+        <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10V4H10"/><path d="M14 4H20V10"/><path d="M4 14V20H10"/><path d="M20 14V20H14"/></svg></div>
+        <h3>Page understanding</h3>
+        <p>Every visible interactive element gets an accessible name — the same
+        representation a screen reader, or an accessibility-tree LLM tool, would use.
+        Not a CSS selector.</p>
+        <code>domScanner.ts</code>
+      </div>
+      <div class="card">
+        <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg></div>
+        <h3>Intent matching</h3>
+        <p>Tokenizes the query, expands it with a synonym table, scores against each
+        element's accessible name. The one piece the brief says doesn't need to be
+        real AI — swappable for an LLM call with no other changes.</p>
+        <code>matcher.ts</code>
+      </div>
+      <div class="card">
+        <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12a8 8 0 0 1 14.9-4M20 12a8 8 0 0 1-14.9 4"/><path d="M18 4v4h-4M6 20v-4h4"/></svg></div>
+        <h3>Reliability loop</h3>
+        <p>Below a confidence threshold, it admits uncertainty instead of guessing
+        wrong. Confirmed matches are logged to a local, SQLite-backed API and boost
+        future scoring for that site.</p>
+        <code>backend/</code>
+      </div>
+    </div>
+  </section>
+
+  <section id="workflow">
+    <div class="callout">
+      <p><strong>"How do I download this project's code?"</strong> highlights the
+      <strong>Code</strong> button. Once the user actually clicks it — a real
+      capture-phase listener, not a fake "Next" button — the extension waits for
+      GitHub's own dropdown to render, re-scans the fresh DOM, and spotlights
+      <strong>Download ZIP</strong> as step 2.</p>
+      <p>One hardcoded workflow, but the shape — trigger, wait for a real user action,
+      re-scan, next target — is what a step-graph model would generalize to for
+      arbitrary multi-step flows.</p>
+    </div>
+  </section>
+
+  <section id="mapping">
+    <h2>Mapping to Hintora's stack</h2>
+    <table class="mapping">
+      <tr><td>TypeScript, browser extensions, injected scripts, DOM understanding, overlays</td><td>the extension itself — <code>extension-src/</code></td></tr>
+      <tr><td>Node, Next.js, Postgres/Supabase</td><td><code>backend/</code>, a Next.js API route with SQLite standing in for Postgres so trying this costs nothing and needs no account</td></tr>
+      <tr><td>AI agents/copilots, RAG</td><td>not a real LLM call, since the brief says that isn't needed — but <code>matcher.ts</code>'s <code>(query, candidates) → ranked matches</code> interface is the seam, and the confirmed-resolutions table is the retrieval corpus a RAG version would query</td></tr>
+    </table>
+  </section>
+
+  <section id="try">
+    <h2>Try it yourself</h2>
+    <p class="section-sub">Two minutes, nothing to sign up for.</p>
+    <ol class="steps">
+      <li><strong>Load the extension.</strong> <code>chrome://extensions</code> → enable Developer mode → Load unpacked → the <code>extension/</code> folder. It's pre-built, no build step needed.</li>
+      <li><strong>Start the backend (optional).</strong> <code>cd backend && npm install && npm run dev</code>, then leave <code>localhost:3000</code> open — a dashboard of confirmed matches.</li>
+      <li><strong>Open any page</strong>, e.g. <code>github.com/facebook/react</code>, click the extension icon, and ask it something.</li>
+    </ol>
+  </section>
+
+  <footer>
+    Built as a PoC for a Hintora application. The
+    <a href="https://github.com/PowerLesha/hintora-poc#readme" target="_blank" rel="noopener">README</a>
+    goes deeper, including where the matching heuristic breaks — left visible on purpose.
+  </footer>
+</div>
+
+</body>
+</html>
