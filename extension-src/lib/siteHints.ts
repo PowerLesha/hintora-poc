@@ -66,3 +66,25 @@ const AGENT_EXAMPLES: Record<string, string[]> = {
 export function agentExamplesFor(hostname: string): string[] {
   return AGENT_EXAMPLES[hostname] || ["Can I use this in a commercial project?", "How do I squash my last 3 commits?"];
 }
+
+export interface ProactiveSuggestion {
+  message: string;
+  cta: string;
+  query: string;
+}
+
+// What the "agent running in the background" (content.ts's nudge timer)
+// offers unprompted, per host, once the widget has been switched on. Kept
+// to hosts/queries the agent mode above actually has a canned answer for,
+// so the proactive nudge and "Ask the agent" stay consistent.
+const PROACTIVE: Record<string, ProactiveSuggestion> = {
+  "github.com": {
+    message: "This looks like a GitHub repo — want me to check it for known security issues?",
+    cta: "Check it",
+    query: "Does this repo have any known security vulnerabilities?",
+  },
+};
+
+export function proactiveSuggestionFor(hostname: string): ProactiveSuggestion | null {
+  return PROACTIVE[hostname] || null;
+}

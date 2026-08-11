@@ -140,6 +140,89 @@ interface CaptureScreenshotMessage {
   type: "HINTORA_CAPTURE_SCREENSHOT";
 }
 
+interface WebSearchMessage {
+  type: "HINTORA_WEB_SEARCH";
+  query: string;
+}
+
+export interface WebSearchResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+// Real web search, no API key: DuckDuckGo's plain-HTML endpoint (the one
+// that works without JS) returns a page we can scrape server-side-style.
+// It has no CORS headers for cross-origin reads, so this needs the
+// html.duckduckgo.com host_permission in manifest.json and needs to run
+// here rather than in content.ts, for the same CSP-exemption reason the
+// backend fetch does. Any failure — network error, timeout, DuckDuckGo
+// blocking the request, or its markup changing shape — resolves to an
+// empty result list rather than throwing, so lib/agent.ts's fallback to
+// its own scripted sources is the only thing the caller ever has to
+// handle, not a distinct error case.
+const SEARCH_TIMEOUT_MS = 6000;
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&#39;/g, "'");
+}
+
+function stripTags(html: string): string {
+  return decodeHtmlEntities(html.replace(/<[^>]*>/g, "")).trim();
+}
+
+function resolveDuckDuckGoRedirect(href: string): string {
+  try {
+    const url = new URL(href.startsWith("//") ? "https:" + href : href);
+    const target = url.searchParams.get("uddg");
+    return target ? decodeURIComponent(target) : href;
+  } catch {
+    return href;
+  }
+}
+
+async function webSearch(query: string): Promise<WebSearchResult[]> {
+  if (!query.trim()) return [];
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+      signal: controller.signal,
+    });
+    if (!res.ok) return [];
+    const html = await res.text();
+
+    const snippets: string[] = [];
+    const snippetRe = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+    let sm: RegExpExecArray | null;
+    while ((sm = snippetRe.exec(html))) snippets.push(stripTags(sm[1]));
+
+    const results: WebSearchResult[] = [];
+    const linkRe = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+    let lm: RegExpExecArray | null;
+    let i = 0;
+    while ((lm = linkRe.exec(html)) && results.length < 4) {
+      results.push({
+        title: stripTags(lm[2]),
+        url: resolveDuckDuckGoRedirect(lm[1]),
+        snippet: snippets[i] || "",
+      });
+      i++;
+    }
+    return results;
+  } catch {
+    return []; // aborted, offline, or DuckDuckGo's markup no longer matches the regexes above
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // Real screenshot capture for "Ask the agent" mode (see lib/agent.ts): a
 // content script can't call chrome.tabs.* itself, so it relays through
 // here, the same reason background.ts already relays backend fetches.
@@ -160,7 +243,11 @@ function captureScreenshot(windowId: number | undefined): Promise<string | null>
 }
 
 chrome.runtime.onMessage.addListener(
-  (msg: GetHintsMessage | LogMessage | CaptureScreenshotMessage, sender, sendResponse) => {
+  (
+    msg: GetHintsMessage | LogMessage | CaptureScreenshotMessage | WebSearchMessage,
+    sender,
+    sendResponse
+  ) => {
     if (msg?.type === "HINTORA_GET_HINTS") {
       backendFetch(`/api/resolutions?hostname=${encodeURIComponent(msg.hostname)}`).then((data: any) => {
         sendResponse({ hints: data?.hints || [] });
@@ -177,6 +264,10 @@ chrome.runtime.onMessage.addListener(
     }
     if (msg?.type === "HINTORA_CAPTURE_SCREENSHOT") {
       captureScreenshot(sender.tab?.windowId).then((dataUrl) => sendResponse({ dataUrl }));
+      return true;
+    }
+    if (msg?.type === "HINTORA_WEB_SEARCH") {
+      webSearch(msg.query).then((results) => sendResponse({ results }));
       return true;
     }
   }

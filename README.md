@@ -45,9 +45,13 @@ Switch to the **Ask the agent** tab at the top of the panel for the other
 kind of question — one that needs outside knowledge, not just a page
 element. Try "Does this repo have any known security vulnerabilities?" or
 "How do I squash my last 3 commits?" and watch the trace: a real
-screenshot capture, then search/reasoning/answer steps arriving one at a
-time. See [Ask the agent](#ask-the-agent-libagentts-a-second-mode-also-mocked)
-for what's real here and what's mocked.
+screenshot capture, a real DuckDuckGo search, then reasoning/answer steps
+arriving one at a time. Reasoning runs through a real on-device model if
+`chrome://flags` → "Prompt API for Gemini Nano" is enabled and its model
+downloaded on this machine; otherwise it falls back to a scripted answer,
+and the trace says so either way. See
+[Ask the agent](#ask-the-agent-libagentts-a-second-mode) for exactly
+what's real vs. scripted and why.
 
 It isn't GitHub-specific. The matcher runs against the accessible name of
 every interactive element on whatever page is open; GitHub is just the demo
@@ -67,8 +71,9 @@ extension-src/         TypeScript source, the actual thing to read or edit
   background.ts           toolbar click relay + backend fetch relay + screenshot capture (see below)
   lib/domScanner.ts        page understanding: interactive elements -> accessible names
   lib/matcher.ts           intent understanding: query -> ranked element matches
-  lib/agent.ts             "Ask the agent" mode: screenshot + mocked web search/reasoning -> answer
-  lib/siteHints.ts         static per-site score boosts + example prompts (both modes)
+  lib/agent.ts             "Ask the agent" mode: screenshot + real web search + real/mocked reasoning -> answer
+  lib/localLLM.ts          Chrome's on-device model (Prompt API), with a silent unavailable fallback
+  lib/siteHints.ts         static per-site score boosts, example prompts, proactive nudge rules
   lib/overlay.ts           spotlight/callout rendering, tracks and self-heals
   types.ts                shared interfaces
   build.mjs               esbuild config, bundles the above into extension/*.js
@@ -134,7 +139,7 @@ substring check plus a per-site hint saves it. A real matcher would use
 embeddings so it doesn't need a growing patch list for every
 plural/synonym/homonym gap like this one.
 
-## Ask the agent (`lib/agent.ts`), a second mode, also mocked
+## Ask the agent (`lib/agent.ts`), a second mode
 
 The panel has a second tab next to "On this page": **Ask the agent**. It's
 for the class of question the DOM matcher above can't answer at all —
@@ -142,33 +147,68 @@ for the class of question the DOM matcher above can't answer at all —
 squash my last 3 commits?" — questions that need outside knowledge or a
 web search, not just a label already sitting on the page.
 
-Two things in this mode are real, not simulated:
+Three things in this mode are real, not simulated, when the browser
+supports them:
 
 - **The screenshot.** Submitting a query calls `chrome.tabs.captureVisibleTab`
   (relayed through `background.ts`, the same reason the backend fetch is:
   a content script can't call `chrome.tabs.*` itself). It's an actual
   capture of the actual tab, gated on the `activeTab` permission rather
   than a broad `<all_urls>` host permission.
-- **The trace.** The panel renders each step as it arrives from an
+- **The web search.** `background.ts`'s `HINTORA_WEB_SEARCH` scrapes
+  DuckDuckGo's plain-HTML endpoint (`html.duckduckgo.com`, declared as a
+  `host_permission`) — a real network request, real titles/URLs/snippets
+  parsed out of the response, no API key. This runs from the background
+  service worker for the same CSP reason the backend fetch does, and
+  DuckDuckGo doesn't send CORS headers permitting a direct read, which is
+  the other reason it can't happen straight from `content.ts`.
+- **The reasoning and the answer.** `lib/localLLM.ts` calls Chrome's
+  built-in on-device model — the Prompt API, backed by Gemini Nano — with
+  the question and (when the search above found something) the real
+  snippets as grounding. No network call, no cost: the model runs on the
+  user's machine. `content.ts`'s trace shows exactly this happening, live.
+- **The trace itself.** The panel renders each step as it arrives from an
   `async function*`, in order, with real delays between phases — it isn't
   a canned animation dressed up to look like a pipeline.
 
-What's mocked, same as `matcher.ts`: the vision understanding, the web
-search, and the reasoning over both are a small lookup table in
-`lib/agent.ts` keyed on a handful of trigger words, not a model call. Its
-exported `run(query, screenshotDataUrl) -> AsyncGenerator<AgentStep>` is
-the seam: a real version would swap the body for one call to a
-vision-capable LLM with a web-search tool (e.g. Claude given the
-screenshot as an image block plus the `web_search` tool), streaming its
-own tool-use/reasoning/answer events into this same step shape — nothing
-in `content.ts` downstream of that call would need to change. Ask it
-something outside the handful of scripted topics and it says so, rather
-than guessing an answer with fake confidence.
+None of the three above is guaranteed to be available on any given
+browser — DuckDuckGo can block the request or change its markup, and the
+on-device model needs a Chrome flag (`chrome://flags` → "Prompt API for
+Gemini Nano") plus a multi-hundred-MB model download most installs won't
+have done. So each one degrades to a small canned knowledge base in
+`lib/agent.ts`, the same "leave it visible, not papered over" approach
+`matcher.ts` uses — and which path actually ran is stated in the trace
+text itself (`"found 3 real results"` vs. `"falling back to this demo's
+cached sources"`), not hidden. Ask something outside the handful of
+scripted topics on a browser without the on-device model enabled, and it
+says exactly that, rather than guessing an answer with fake confidence.
+`run(query, screenshotDataUrl) -> AsyncGenerator<AgentStep>` is still the
+overall seam — a hosted version would swap DuckDuckGo scraping for a real
+search API and the on-device model for a hosted one, but the shape
+wouldn't change.
 
 When an answer maps back to something clickable, it also shows a "Show me
 on the page" button that spotlights that element via the same `overlay`
 the DOM-matcher mode uses — the two modes end at the same guidance
 primitive, they just start from different kinds of question.
+
+**The unprompted part.** Once the widget is switched on for a tab, it
+doesn't just wait to be asked. Close the panel back down to just the
+floating bubble (✕, Escape, or the bubble itself) and, a few seconds
+later, it can nudge on its own — a small callout near the bubble, no
+typed question involved — offering to check something proactively
+(`siteHints.ts`'s `proactiveSuggestionFor`, gated to hosts/queries the
+agent above already has a canned answer for). Accepting it reopens the
+panel in agent mode and runs the exact same pipeline as if the user had
+typed the question themselves.
+
+That nudge is deliberately gated on the widget already being visible for
+this tab, rather than firing on every page load, for a real reason, not
+just pacing: showing the widget is also what invokes the extension via the
+toolbar icon, which is what grants `activeTab` for that tab — the same
+permission the nudge's own screenshot capture needs once accepted.
+Watching from page load with no invocation yet would mean the eventual
+screenshot call has nothing to work with.
 
 ## Reliability loop (the backend)
 
@@ -228,25 +268,26 @@ for arbitrary flows.
 - Node, Next.js, Postgres/Supabase: `backend/`, a Next.js API route with
   SQLite standing in for Postgres/Supabase so trying this out costs
   nothing and needs no account.
-- AI agents/copilots, RAG: not built as a real LLM call, since the brief
-  says that isn't needed, but `matcher.ts`'s
+- AI agents/copilots, RAG: `matcher.ts`'s DOM matching isn't a real LLM
+  call, since the brief says that isn't needed, but its
   `(query, candidates) -> ranked matches` interface is the seam where one
   would go, and the backend's confirmed-resolutions table is the retrieval
   corpus a RAG-style version would query instead of, or alongside, the
-  static hint table. `lib/agent.ts`'s "Ask the agent" mode is the same idea
-  applied to screenshots and web knowledge instead of the DOM: a real
-  screenshot capture and a real step-by-step async pipeline, with only the
-  vision/search/reasoning call itself mocked, at the exact seam
-  (`run(query, screenshotDataUrl)`) a vision LLM + web-search tool call
-  would replace.
+  static hint table. `lib/agent.ts`'s "Ask the agent" mode goes a step
+  further: real screenshot capture, a real DuckDuckGo web search, and real
+  reasoning through Chrome's on-device LLM when it's available on the
+  browser, each falling back to a small scripted knowledge base when it
+  isn't — the closest thing in this PoC to the actual "AI agent that
+  browses and answers" Hintora is building toward.
 
 ## What's next if this were the real product
 
 - Swap `matcher.ts`'s body for the LLM call described above, so the
   callout text isn't just "Click here for '\<query\>'".
-- Swap `agent.ts`'s body for a real vision LLM + web-search tool call, so
-  "Ask the agent" answers arbitrary questions instead of a handful of
-  scripted ones.
+- Swap the DuckDuckGo scrape and the on-device model in `agent.ts` for a
+  hosted search API and a hosted vision-capable LLM, so "Ask the agent"
+  answers arbitrary questions reliably instead of depending on Chrome's
+  experimental Prompt API being enabled.
 - A step-graph format for multi-step flows: a node holding an intent
   description, a resolution strategy, and an advance condition, authored
   by a customer or inferred from recorded successful task completions.

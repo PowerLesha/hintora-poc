@@ -226,6 +226,16 @@
   function agentExamplesFor(hostname) {
     return AGENT_EXAMPLES[hostname] || ["Can I use this in a commercial project?", "How do I squash my last 3 commits?"];
   }
+  var PROACTIVE = {
+    "github.com": {
+      message: "This looks like a GitHub repo \u2014 want me to check it for known security issues?",
+      cta: "Check it",
+      query: "Does this repo have any known security vulnerabilities?"
+    }
+  };
+  function proactiveSuggestionFor(hostname) {
+    return PROACTIVE[hostname] || null;
+  }
 
   // lib/overlay.ts
   var box = null;
@@ -314,6 +324,69 @@
   }
   var overlay = { show, hide };
 
+  // lib/localLLM.ts
+  function getModel() {
+    const g = globalThis;
+    return g.LanguageModel || g.ai?.languageModel || null;
+  }
+  function withTimeout(promise, ms) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("local LLM timed out")), ms);
+      promise.then(
+        (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        },
+        (e) => {
+          clearTimeout(timer);
+          reject(e);
+        }
+      );
+    });
+  }
+  async function getLocalLLMStatus() {
+    try {
+      const model = getModel();
+      if (!model) return "unavailable";
+      if (model.availability) return await model.availability();
+      if (model.capabilities) return (await model.capabilities()).available || "unavailable";
+      return "available";
+    } catch {
+      return "unavailable";
+    }
+  }
+  function startLocalLLMDownload() {
+    const model = getModel();
+    if (!model) return { progress: () => 0, done: Promise.resolve(false) };
+    let loaded = 0;
+    const done = model.create({
+      monitor(m) {
+        m.addEventListener("downloadprogress", (e) => {
+          loaded = e.loaded;
+        });
+      }
+    }).then((session) => {
+      session.destroy?.();
+      return true;
+    }).catch(() => false);
+    return { progress: () => loaded, done };
+  }
+  async function askLocalLLM(prompt) {
+    try {
+      const model = getModel();
+      if (!model) return null;
+      const session = await withTimeout(model.create(), 8e3);
+      try {
+        const text = await withTimeout(session.prompt(prompt), 2e4);
+        return text?.trim() || null;
+      } finally {
+        session.destroy?.();
+      }
+    } catch {
+      return null;
+    }
+  }
+
   // lib/agent.ts
   var KNOWLEDGE_BASE = [
     {
@@ -364,11 +437,8 @@
     }
   ];
   var FALLBACK = {
-    visionNote: "Screenshot captured. This demo agent only reasons over a handful of scripted topics, so treat this step as a stand-in for real vision understanding.",
-    searchQuery: "",
-    sources: [],
-    reasoning: "No canned answer matches this question closely enough to fake confidently.",
-    answer: "This demo agent only knows a few scripted answers \u2014 try one of the example chips. A real version would send the screenshot and this question to a vision-capable LLM with a web-search tool instead of a lookup table (see the comment at the top of `lib/agent.ts`)."
+    reasoning: "No canned reasoning for this one, and either the on-device model isn't available on this browser or the live search didn't turn up anything to ground an answer in.",
+    answer: `This demo has no scripted answer for that exact question. Try one of the example chips \u2014 or enable Chrome's on-device model ("Prompt API for Gemini Nano" in chrome://flags) and this would generate a real one instead.`
   };
   function pickEntry(query) {
     const qTokens = tokenize(query);
@@ -389,24 +459,82 @@
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+  function webSearch(query) {
+    if (!query.trim()) return Promise.resolve([]);
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: "HINTORA_WEB_SEARCH", query }, (res) => {
+        resolve(Array.isArray(res?.results) ? res.results : []);
+      });
+    });
+  }
   async function* run(query, screenshotDataUrl) {
     const entry = pickEntry(query);
-    const e = entry || FALLBACK;
-    await sleep(500);
+    await sleep(450);
     yield {
       phase: "vision",
-      text: screenshotDataUrl ? e.visionNote : "Couldn't capture a screenshot on this page (blocked page or missing permission) \u2014 reasoning on the question alone."
+      text: screenshotDataUrl ? entry?.visionNote || "Screenshot captured \u2014 reasoning on the question and whatever's on the page." : "Couldn't capture a screenshot on this page (blocked page, or the toolbar icon hasn't been clicked yet this tab) \u2014 reasoning on the question alone."
     };
-    await sleep(650);
-    if (entry) {
-      yield { phase: "search", text: `Searching the web for "${e.searchQuery}"\u2026`, sources: e.sources };
-    } else {
-      yield { phase: "search", text: "No confident search query for this one \u2014 falling back to a scripted answer." };
+    const searchQuery = entry?.searchQuery || query;
+    const liveResults = await webSearch(searchQuery);
+    const usingLive = liveResults.length > 0;
+    const sources = usingLive ? liveResults.slice(0, 3).map((r) => ({ title: r.title, url: r.url })) : entry?.sources || [];
+    yield {
+      phase: "search",
+      text: usingLive ? `Searched the web for "${searchQuery}" \u2014 found ${liveResults.length} real result${liveResults.length === 1 ? "" : "s"}.` : entry ? `Live web search didn't return anything usable for "${searchQuery}" \u2014 falling back to this demo's cached sources.` : `Live web search didn't return anything usable for "${searchQuery}", and no scripted fallback covers this question.`,
+      sources
+    };
+    let llmStatus = await getLocalLLMStatus();
+    if (llmStatus === "downloadable" || llmStatus === "after-download" || llmStatus === "downloading") {
+      const { progress, done } = startLocalLLMDownload();
+      let finished = false;
+      done.then(() => {
+        finished = true;
+      });
+      let lastPct = -1;
+      while (!finished) {
+        const pct = Math.round(progress() * 100);
+        if (pct !== lastPct) {
+          yield { phase: "download", text: `Downloading Chrome's on-device model (first time only) \u2014 ${pct}%\u2026`, pending: true };
+          lastPct = pct;
+        }
+        await sleep(400);
+      }
+      const ready = await done;
+      llmStatus = ready ? "available" : llmStatus;
+      yield {
+        phase: "download",
+        text: ready ? "On-device model downloaded \u2014 using it for this answer." : "Model download didn't finish \u2014 falling back to scripted reasoning.",
+        pending: false
+      };
     }
-    await sleep(700);
-    yield { phase: "reason", text: e.reasoning };
-    await sleep(500);
-    yield { phase: "answer", text: e.answer, targetName: entry?.targetName };
+    const llmAvailable = llmStatus === "available" || llmStatus === "readily";
+    let reasoning;
+    let answer;
+    if (llmAvailable && (usingLive || entry)) {
+      const grounding = usingLive ? liveResults.slice(0, 3).map((r, i) => `${i + 1}. ${r.title} \u2014 ${r.snippet}`).join("\n") : entry?.reasoning || "";
+      const prompt = [
+        `You are a browser assistant helping someone on ${location.hostname || "this site"}.`,
+        `Question: "${query}"`,
+        grounding ? `Relevant information:
+${grounding}` : "",
+        "Answer in 2-4 concise, actionable sentences. No preamble."
+      ].filter(Boolean).join("\n\n");
+      const generated = await askLocalLLM(prompt);
+      if (generated) {
+        answer = generated;
+        reasoning = "Chrome's on-device model (Gemini Nano) reasoned over the question and the information above.";
+      } else {
+        reasoning = entry?.reasoning || FALLBACK.reasoning;
+        answer = entry?.answer || FALLBACK.answer;
+      }
+    } else {
+      reasoning = entry?.reasoning || (usingLive ? "No on-device model available on this browser to reason over the live results \u2014 see the sources above." : FALLBACK.reasoning);
+      answer = entry?.answer || (usingLive ? `No scripted answer for that exact question, and the local model isn't available on this browser to summarize the sources above for "${searchQuery}".` : FALLBACK.answer);
+    }
+    await sleep(350);
+    yield { phase: "reason", text: reasoning };
+    await sleep(350);
+    yield { phase: "answer", text: answer, targetName: entry?.targetName };
   }
 
   // content.ts
@@ -433,8 +561,14 @@
   var modeToggleEls;
   var traceEl;
   var answerEl;
+  var nudge;
+  var nudgeTextEl;
+  var nudgeCtaEl;
   var activeWorkflowCleanup = null;
   var mode = "page";
+  var nudgeTimer = null;
+  var nudgeDismissed = false;
+  var hasEngaged = false;
   var dynamicHints = [];
   chrome.runtime.sendMessage({ type: "HINTORA_GET_HINTS", hostname: location.hostname }, (res) => {
     if (res?.hints) dynamicHints = res.hints;
@@ -492,6 +626,14 @@
       <div class="hintora-answer hintora-hidden"></div>
     </div>
   `;
+    nudge = document.createElement("div");
+    nudge.className = "hintora-nudge hintora-hidden";
+    nudge.innerHTML = `
+    <button type="button" class="hintora-icon-btn hintora-nudge-close" aria-label="Dismiss">${CLOSE_ICON}</button>
+    <p class="hintora-nudge-text"></p>
+    <button type="button" class="hintora-nudge-cta"></button>
+  `;
+    root.appendChild(nudge);
     root.appendChild(bubble);
     root.appendChild(panel);
     document.documentElement.appendChild(root);
@@ -503,14 +645,27 @@
     modeToggleEls = Array.from(panel.querySelectorAll(".hintora-mode-btn"));
     traceEl = panel.querySelector(".hintora-trace");
     answerEl = panel.querySelector(".hintora-answer");
+    nudgeTextEl = nudge.querySelector(".hintora-nudge-text");
+    nudgeCtaEl = nudge.querySelector(".hintora-nudge-cta");
     renderChips(examplesFor(location.hostname));
+    nudge.querySelector(".hintora-nudge-close").addEventListener("click", () => {
+      nudgeDismissed = true;
+      hideNudge();
+    });
     bubble.addEventListener("click", () => {
       panel.classList.toggle("hintora-hidden");
-      if (!panel.classList.contains("hintora-hidden")) input.focus();
+      if (!panel.classList.contains("hintora-hidden")) {
+        input.focus();
+        cancelNudgeTimer();
+        hideNudge();
+      } else {
+        maybeScheduleNudge();
+      }
     });
     panel.querySelector("[data-close]").addEventListener("click", () => {
       panel.classList.add("hintora-hidden");
       overlay.hide();
+      maybeScheduleNudge();
     });
     for (const btn of modeToggleEls) {
       btn.addEventListener("click", () => setMode(btn.dataset.mode));
@@ -522,6 +677,7 @@
       if (e.key === "Escape") {
         panel.classList.add("hintora-hidden");
         overlay.hide();
+        maybeScheduleNudge();
       }
     });
   }
@@ -539,6 +695,35 @@
     input.value = "";
     input.placeholder = newMode === "page" ? "What are you trying to do?" : "Ask a how-to question\u2026";
     renderChips(newMode === "page" ? examplesFor(location.hostname) : agentExamplesFor(location.hostname));
+  }
+  function hideNudge() {
+    nudge.classList.add("hintora-hidden");
+  }
+  function cancelNudgeTimer() {
+    if (nudgeTimer) {
+      clearTimeout(nudgeTimer);
+      nudgeTimer = null;
+    }
+  }
+  function showNudge(suggestion) {
+    if (hasEngaged || nudgeDismissed) return;
+    nudgeTextEl.textContent = suggestion.message;
+    nudgeCtaEl.textContent = suggestion.cta;
+    nudgeCtaEl.onclick = () => {
+      hideNudge();
+      panel.classList.remove("hintora-hidden");
+      setMode("agent");
+      input.value = suggestion.query;
+      runAgentQuery(suggestion.query);
+    };
+    nudge.classList.remove("hintora-hidden");
+  }
+  function maybeScheduleNudge() {
+    cancelNudgeTimer();
+    if (hasEngaged || nudgeDismissed) return;
+    const suggestion = proactiveSuggestionFor(location.hostname);
+    if (!suggestion) return;
+    nudgeTimer = setTimeout(() => showNudge(suggestion), 4e3);
   }
   function renderChips(examples) {
     chipsEl.innerHTML = "";
@@ -616,6 +801,9 @@
   function runQuery(rawQuery) {
     const query = (rawQuery || "").trim();
     if (!query) return;
+    hasEngaged = true;
+    cancelNudgeTimer();
+    hideNudge();
     cleanupWorkflow();
     hideFeedback();
     const candidates = scan(document);
@@ -700,10 +888,10 @@
     row.appendChild(textWrap);
     traceEl.appendChild(row);
   }
-  function updateTraceStep(id, text) {
+  function updateTraceStep(id, text, pending = false) {
     const row = traceEl.querySelector(`[data-step-id="${id}"]`);
     if (!row) return;
-    row.querySelector(".hintora-trace-icon").innerHTML = CHECK_ICON;
+    row.querySelector(".hintora-trace-icon").innerHTML = pending ? `<div class="hintora-trace-spinner"></div>` : CHECK_ICON;
     row.querySelector(".hintora-trace-text").textContent = text;
   }
   function formatAnswer(text) {
@@ -733,6 +921,9 @@
   async function runAgentQuery(rawQuery) {
     const query = (rawQuery || "").trim();
     if (!query) return;
+    hasEngaged = true;
+    cancelNudgeTimer();
+    hideNudge();
     cleanupWorkflow();
     hideFeedback();
     overlay.hide();
@@ -748,7 +939,11 @@
       screenshot ? "Captured a screenshot of this tab." : "Couldn't capture a screenshot on this page."
     );
     for await (const step of run(query, screenshot)) {
-      addTraceStep(step.phase, step.text, false, step.sources);
+      if (traceEl.querySelector(`[data-step-id="${step.phase}"]`)) {
+        updateTraceStep(step.phase, step.text, step.pending ?? false);
+      } else {
+        addTraceStep(step.phase, step.text, step.pending ?? false, step.sources);
+      }
       if (step.phase === "answer") renderAnswer(step.text, step.targetName, query);
     }
   }
@@ -759,8 +954,12 @@
       if (!root.classList.contains("hintora-hidden")) {
         panel.classList.remove("hintora-hidden");
         input.focus();
+        cancelNudgeTimer();
+        hideNudge();
       } else {
         overlay.hide();
+        cancelNudgeTimer();
+        hideNudge();
       }
     }
   });

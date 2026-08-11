@@ -475,3 +475,51 @@
   font-size: 12px;
   cursor: pointer;
 }
+
+/* Proactive nudge: the agent initiating contact unprompted, not a response
+   to a typed question. Anchored where the panel would open, so it reads as
+   "the same assistant, speaking up on its own" rather than a new surface. */
+.hintora-nudge {
+  position: absolute;
+  bottom: 62px;
+  right: 0;
+  width: 250px;
+  background: var(--hintora-bg-solid);
+  border: 1px solid var(--hintora-border);
+  border-radius: var(--hintora-radius-md);
+  box-shadow: var(--hintora-shadow-lg);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  animation: hintora-nudge-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.hintora-nudge-close {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  color: var(--hintora-text-dim);
+}
+.hintora-nudge-text {
+  margin: 0;
+  padding-right: 16px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--hintora-text);
+}
+.hintora-nudge-cta {
+  align-self: flex-start;
+  background: linear-gradient(135deg, var(--hintora-accent-1), var(--hintora-accent-2));
+  border: none;
+  color: white;
+  border-radius: var(--hintora-radius-sm);
+  padding: 6px 14px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
+}
+@keyframes hintora-nudge-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

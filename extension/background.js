@@ -95,6 +95,55 @@
       clearTimeout(timer);
     }
   }
+  var SEARCH_TIMEOUT_MS = 6e3;
+  function decodeHtmlEntities(text) {
+    return text.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&#39;/g, "'");
+  }
+  function stripTags(html) {
+    return decodeHtmlEntities(html.replace(/<[^>]*>/g, "")).trim();
+  }
+  function resolveDuckDuckGoRedirect(href) {
+    try {
+      const url = new URL(href.startsWith("//") ? "https:" + href : href);
+      const target = url.searchParams.get("uddg");
+      return target ? decodeURIComponent(target) : href;
+    } catch {
+      return href;
+    }
+  }
+  async function webSearch(query) {
+    if (!query.trim()) return [];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), SEARCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
+        signal: controller.signal
+      });
+      if (!res.ok) return [];
+      const html = await res.text();
+      const snippets = [];
+      const snippetRe = /<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
+      let sm;
+      while (sm = snippetRe.exec(html)) snippets.push(stripTags(sm[1]));
+      const results = [];
+      const linkRe = /<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+      let lm;
+      let i = 0;
+      while ((lm = linkRe.exec(html)) && results.length < 4) {
+        results.push({
+          title: stripTags(lm[2]),
+          url: resolveDuckDuckGoRedirect(lm[1]),
+          snippet: snippets[i] || ""
+        });
+        i++;
+      }
+      return results;
+    } catch {
+      return [];
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   function captureScreenshot(windowId) {
     return new Promise((resolve) => {
       if (windowId == null) {
@@ -125,6 +174,10 @@
       }
       if (msg?.type === "HINTORA_CAPTURE_SCREENSHOT") {
         captureScreenshot(sender.tab?.windowId).then((dataUrl) => sendResponse({ dataUrl }));
+        return true;
+      }
+      if (msg?.type === "HINTORA_WEB_SEARCH") {
+        webSearch(msg.query).then((results) => sendResponse({ results }));
         return true;
       }
     }

@@ -10,7 +10,7 @@
     "service_worker": "background.js"
   },
   "permissions": ["activeTab"],
-  "host_permissions": ["http://localhost:3000/*"],
+  "host_permissions": ["http://localhost:3000/*", "https://html.duckduckgo.com/*"],
   "content_scripts": [
     {
       "matches": ["<all_urls>"],

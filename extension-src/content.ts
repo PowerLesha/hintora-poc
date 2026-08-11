@@ -6,7 +6,8 @@
 // falls back to the static per-site hints only.
 import { scan } from "./lib/domScanner";
 import { match, tokenize } from "./lib/matcher";
-import { boostFor, examplesFor, agentExamplesFor } from "./lib/siteHints";
+import { boostFor, examplesFor, agentExamplesFor, proactiveSuggestionFor } from "./lib/siteHints";
+import type { ProactiveSuggestion } from "./lib/siteHints";
 import { overlay } from "./lib/overlay";
 import { run as runAgent } from "./lib/agent";
 import type { Candidate, DynamicHint, RankedCandidate } from "./types";
@@ -55,12 +56,27 @@ let sendBtn: HTMLButtonElement;
 let modeToggleEls: HTMLButtonElement[];
 let traceEl: HTMLDivElement;
 let answerEl: HTMLDivElement;
+let nudge: HTMLDivElement;
+let nudgeTextEl: HTMLParagraphElement;
+let nudgeCtaEl: HTMLButtonElement;
 let activeWorkflowCleanup: (() => void) | null = null;
 
 // "On this page" (existing DOM matcher) vs "Ask the agent" (screenshot +
 // mocked web search/reasoning, see lib/agent.ts). Same input box, different
 // pipeline behind Ask/Enter.
 let mode: "page" | "agent" = "page";
+
+// The literal "agent running in the background" piece: once the widget has
+// been switched on for this tab, it watches (no explicit question needed)
+// and after a delay offers a suggestion unprompted, same as the AI agent
+// answers questions rather than just resolving them. Gated on the widget
+// already being visible rather than firing on page load for every tab,
+// because that's also the moment "activeTab" gets granted for this tab
+// (the toolbar icon click that shows the widget is what invokes the
+// extension) — the same permission the eventual screenshot capture needs.
+let nudgeTimer: ReturnType<typeof setTimeout> | null = null;
+let nudgeDismissed = false;
+let hasEngaged = false; // true once the user has asked anything, in either mode
 
 // Past confirmed resolutions for this hostname, fetched once on load from
 // the backend. Empty array (not an error state) if the backend is
@@ -132,6 +148,15 @@ function buildWidget(): void {
     </div>
   `;
 
+  nudge = document.createElement("div");
+  nudge.className = "hintora-nudge hintora-hidden";
+  nudge.innerHTML = `
+    <button type="button" class="hintora-icon-btn hintora-nudge-close" aria-label="Dismiss">${CLOSE_ICON}</button>
+    <p class="hintora-nudge-text"></p>
+    <button type="button" class="hintora-nudge-cta"></button>
+  `;
+
+  root.appendChild(nudge);
   root.appendChild(bubble);
   root.appendChild(panel);
   document.documentElement.appendChild(root);
@@ -144,16 +169,30 @@ function buildWidget(): void {
   modeToggleEls = Array.from(panel.querySelectorAll(".hintora-mode-btn"));
   traceEl = panel.querySelector(".hintora-trace")!;
   answerEl = panel.querySelector(".hintora-answer")!;
+  nudgeTextEl = nudge.querySelector(".hintora-nudge-text")!;
+  nudgeCtaEl = nudge.querySelector(".hintora-nudge-cta")!;
 
   renderChips(examplesFor(location.hostname));
 
+  nudge.querySelector(".hintora-nudge-close")!.addEventListener("click", () => {
+    nudgeDismissed = true;
+    hideNudge();
+  });
+
   bubble.addEventListener("click", () => {
     panel.classList.toggle("hintora-hidden");
-    if (!panel.classList.contains("hintora-hidden")) input.focus();
+    if (!panel.classList.contains("hintora-hidden")) {
+      input.focus();
+      cancelNudgeTimer();
+      hideNudge();
+    } else {
+      maybeScheduleNudge();
+    }
   });
   panel.querySelector("[data-close]")!.addEventListener("click", () => {
     panel.classList.add("hintora-hidden");
     overlay.hide();
+    maybeScheduleNudge();
   });
   for (const btn of modeToggleEls) {
     btn.addEventListener("click", () => setMode(btn.dataset.mode as "page" | "agent"));
@@ -165,6 +204,7 @@ function buildWidget(): void {
     if (e.key === "Escape") {
       panel.classList.add("hintora-hidden");
       overlay.hide();
+      maybeScheduleNudge();
     }
   });
 }
@@ -183,6 +223,39 @@ function setMode(newMode: "page" | "agent"): void {
   input.value = "";
   input.placeholder = newMode === "page" ? "What are you trying to do?" : "Ask a how-to question…";
   renderChips(newMode === "page" ? examplesFor(location.hostname) : agentExamplesFor(location.hostname));
+}
+
+function hideNudge(): void {
+  nudge.classList.add("hintora-hidden");
+}
+
+function cancelNudgeTimer(): void {
+  if (nudgeTimer) {
+    clearTimeout(nudgeTimer);
+    nudgeTimer = null;
+  }
+}
+
+function showNudge(suggestion: ProactiveSuggestion): void {
+  if (hasEngaged || nudgeDismissed) return;
+  nudgeTextEl.textContent = suggestion.message;
+  nudgeCtaEl.textContent = suggestion.cta;
+  nudgeCtaEl.onclick = () => {
+    hideNudge();
+    panel.classList.remove("hintora-hidden");
+    setMode("agent");
+    input.value = suggestion.query;
+    runAgentQuery(suggestion.query);
+  };
+  nudge.classList.remove("hintora-hidden");
+}
+
+function maybeScheduleNudge(): void {
+  cancelNudgeTimer();
+  if (hasEngaged || nudgeDismissed) return;
+  const suggestion = proactiveSuggestionFor(location.hostname);
+  if (!suggestion) return;
+  nudgeTimer = setTimeout(() => showNudge(suggestion), 4000);
 }
 
 function renderChips(examples: string[]): void {
@@ -277,6 +350,9 @@ function cleanupWorkflow(): void {
 function runQuery(rawQuery: string): void {
   const query = (rawQuery || "").trim();
   if (!query) return;
+  hasEngaged = true;
+  cancelNudgeTimer();
+  hideNudge();
   cleanupWorkflow();
   hideFeedback();
 
@@ -377,10 +453,10 @@ function addTraceStep(id: string, text: string, pending: boolean, sources?: { ti
   traceEl.appendChild(row);
 }
 
-function updateTraceStep(id: string, text: string): void {
+function updateTraceStep(id: string, text: string, pending = false): void {
   const row = traceEl.querySelector<HTMLDivElement>(`[data-step-id="${id}"]`);
   if (!row) return;
-  row.querySelector(".hintora-trace-icon")!.innerHTML = CHECK_ICON;
+  row.querySelector(".hintora-trace-icon")!.innerHTML = pending ? `<div class="hintora-trace-spinner"></div>` : CHECK_ICON;
   row.querySelector(".hintora-trace-text")!.textContent = text;
 }
 
@@ -419,6 +495,9 @@ function renderAnswer(text: string, targetName: string | undefined, query: strin
 async function runAgentQuery(rawQuery: string): Promise<void> {
   const query = (rawQuery || "").trim();
   if (!query) return;
+  hasEngaged = true;
+  cancelNudgeTimer();
+  hideNudge();
   cleanupWorkflow();
   hideFeedback();
   overlay.hide();
@@ -437,7 +516,11 @@ async function runAgentQuery(rawQuery: string): Promise<void> {
   );
 
   for await (const step of runAgent(query, screenshot)) {
-    addTraceStep(step.phase, step.text, false, step.sources);
+    if (traceEl.querySelector(`[data-step-id="${step.phase}"]`)) {
+      updateTraceStep(step.phase, step.text, step.pending ?? false);
+    } else {
+      addTraceStep(step.phase, step.text, step.pending ?? false, step.sources);
+    }
     if (step.phase === "answer") renderAnswer(step.text, step.targetName, query);
   }
 }
@@ -450,8 +533,12 @@ chrome.runtime.onMessage.addListener((msg) => {
     if (!root.classList.contains("hintora-hidden")) {
       panel.classList.remove("hintora-hidden");
       input.focus();
+      cancelNudgeTimer();
+      hideNudge();
     } else {
       overlay.hide();
+      cancelNudgeTimer();
+      hideNudge();
     }
   }
 });

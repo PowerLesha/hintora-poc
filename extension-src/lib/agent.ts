@@ -1,21 +1,26 @@
 // "Ask the agent" mode: screenshot + web search + reasoning -> an answer,
-// plus an optional pointer back at a real element on the page. Two things
-// here are real: the screenshot (background.ts's HINTORA_CAPTURE_SCREENSHOT
-// calls the actual chrome.tabs.captureVisibleTab) and the step-by-step
-// trace (this generator really does run async, in order, with real delays
-// between phases, and content.ts renders each step as it arrives rather
-// than waiting for a single final response).
+// plus an optional pointer back at a real element on the page.
 //
-// What's mocked, the same "leave it visible, not papered over" approach as
-// matcher.ts: the vision understanding, the web search, and the reasoning
-// over both are a small canned lookup table instead of a model call. run()
-// is the seam: (query, screenshotDataUrl) -> AsyncGenerator<AgentStep>. A
-// real version would swap the body for one call to a vision-capable LLM
-// given the screenshot as an image block and a web-search tool (e.g.
-// Claude with the `web_search` tool), streaming its own tool-use/
-// reasoning/answer events into this same step shape — nothing downstream
-// of run() would need to change.
+// Three things here are real when the browser supports them, not
+// simulated: the screenshot (background.ts's HINTORA_CAPTURE_SCREENSHOT
+// calls the actual chrome.tabs.captureVisibleTab), the web search
+// (background.ts's HINTORA_WEB_SEARCH scrapes DuckDuckGo's plain-HTML
+// endpoint for real results, no API key), and the reasoning/answer, which
+// runs through Chrome's built-in on-device model (lib/localLLM.ts, the
+// Prompt API / Gemini Nano) when this browser has it enabled and
+// downloaded. The step-by-step trace is a genuine async pipeline too,
+// rendered as it actually runs, not a canned animation.
+//
+// Every one of those three has a graceful, honest fallback when it isn't
+// available — offline, DuckDuckGo blocking the request or changing its
+// markup, or the on-device model not being enabled on this Chrome
+// install: a small canned knowledge base below, the same "leave it
+// visible, not papered over" approach matcher.ts uses. Which path ran is
+// stated in the trace text itself rather than hidden, so trying this on a
+// browser without the Prompt API enabled still shows an honest, working
+// demo instead of a silent downgrade.
 import { tokenize } from "./matcher";
+import { askLocalLLM, getLocalLLMStatus, startLocalLLMDownload } from "./localLLM";
 
 export interface AgentSource {
   title: string;
@@ -23,10 +28,15 @@ export interface AgentSource {
 }
 
 export interface AgentStep {
-  phase: "vision" | "search" | "reason" | "answer";
+  phase: "vision" | "search" | "download" | "reason" | "answer";
   text: string;
+  pending?: boolean;
   sources?: AgentSource[];
   targetName?: string; // accessible name of an on-page element worth spotlighting, if the answer has one
+}
+
+interface RawSearchResult extends AgentSource {
+  snippet: string;
 }
 
 interface AgentEntry {
@@ -97,14 +107,11 @@ const KNOWLEDGE_BASE: AgentEntry[] = [
   },
 ];
 
-const FALLBACK: Omit<AgentEntry, "triggerTokens" | "targetName"> = {
-  visionNote:
-    "Screenshot captured. This demo agent only reasons over a handful of scripted topics, so treat this step as a stand-in for real vision understanding.",
-  searchQuery: "",
-  sources: [],
-  reasoning: "No canned answer matches this question closely enough to fake confidently.",
+const FALLBACK = {
+  reasoning:
+    "No canned reasoning for this one, and either the on-device model isn't available on this browser or the live search didn't turn up anything to ground an answer in.",
   answer:
-    "This demo agent only knows a few scripted answers — try one of the example chips. A real version would send the screenshot and this question to a vision-capable LLM with a web-search tool instead of a lookup table (see the comment at the top of `lib/agent.ts`).",
+    'This demo has no scripted answer for that exact question. Try one of the example chips — or enable Chrome\'s on-device model ("Prompt API for Gemini Nano" in chrome://flags) and this would generate a real one instead.',
 };
 
 function pickEntry(query: string): AgentEntry | null {
@@ -128,28 +135,115 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Relayed through background.ts (see the comment there): a content script
+// can't fetch a cross-origin page itself when the host page's CSP doesn't
+// allow it, and DuckDuckGo's response has no CORS headers permitting a
+// direct read from here anyway. Resolves to [] on any failure, network or
+// otherwise, so this function never throws.
+function webSearch(query: string): Promise<RawSearchResult[]> {
+  if (!query.trim()) return Promise.resolve([]);
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "HINTORA_WEB_SEARCH", query }, (res) => {
+      resolve(Array.isArray(res?.results) ? res.results : []);
+    });
+  });
+}
+
 export async function* run(query: string, screenshotDataUrl: string | null): AsyncGenerator<AgentStep> {
   const entry = pickEntry(query);
-  const e = entry || FALLBACK;
 
-  await sleep(500);
+  await sleep(450);
   yield {
     phase: "vision",
     text: screenshotDataUrl
-      ? e.visionNote
-      : "Couldn't capture a screenshot on this page (blocked page or missing permission) — reasoning on the question alone.",
+      ? entry?.visionNote || "Screenshot captured — reasoning on the question and whatever's on the page."
+      : "Couldn't capture a screenshot on this page (blocked page, or the toolbar icon hasn't been clicked yet this tab) — reasoning on the question alone.",
   };
 
-  await sleep(650);
-  if (entry) {
-    yield { phase: "search", text: `Searching the web for "${e.searchQuery}"…`, sources: e.sources };
-  } else {
-    yield { phase: "search", text: "No confident search query for this one — falling back to a scripted answer." };
+  const searchQuery = entry?.searchQuery || query;
+  const liveResults = await webSearch(searchQuery);
+  const usingLive = liveResults.length > 0;
+  const sources: AgentSource[] = usingLive
+    ? liveResults.slice(0, 3).map((r) => ({ title: r.title, url: r.url }))
+    : entry?.sources || [];
+
+  yield {
+    phase: "search",
+    text: usingLive
+      ? `Searched the web for "${searchQuery}" — found ${liveResults.length} real result${liveResults.length === 1 ? "" : "s"}.`
+      : entry
+        ? `Live web search didn't return anything usable for "${searchQuery}" — falling back to this demo's cached sources.`
+        : `Live web search didn't return anything usable for "${searchQuery}", and no scripted fallback covers this question.`,
+    sources,
+  };
+
+  let llmStatus = await getLocalLLMStatus();
+  if (llmStatus === "downloadable" || llmStatus === "after-download" || llmStatus === "downloading") {
+    const { progress, done } = startLocalLLMDownload();
+    let finished = false;
+    done.then(() => {
+      finished = true;
+    });
+    let lastPct = -1;
+    while (!finished) {
+      const pct = Math.round(progress() * 100);
+      if (pct !== lastPct) {
+        yield { phase: "download", text: `Downloading Chrome's on-device model (first time only) — ${pct}%…`, pending: true };
+        lastPct = pct;
+      }
+      await sleep(400);
+    }
+    const ready = await done;
+    llmStatus = ready ? "available" : llmStatus;
+    yield {
+      phase: "download",
+      text: ready
+        ? "On-device model downloaded — using it for this answer."
+        : "Model download didn't finish — falling back to scripted reasoning.",
+      pending: false,
+    };
   }
 
-  await sleep(700);
-  yield { phase: "reason", text: e.reasoning };
+  const llmAvailable = llmStatus === "available" || llmStatus === "readily";
+  let reasoning: string;
+  let answer: string;
 
-  await sleep(500);
-  yield { phase: "answer", text: e.answer, targetName: entry?.targetName };
+  if (llmAvailable && (usingLive || entry)) {
+    const grounding = usingLive
+      ? liveResults.slice(0, 3).map((r, i) => `${i + 1}. ${r.title} — ${r.snippet}`).join("\n")
+      : entry?.reasoning || "";
+    const prompt = [
+      `You are a browser assistant helping someone on ${location.hostname || "this site"}.`,
+      `Question: "${query}"`,
+      grounding ? `Relevant information:\n${grounding}` : "",
+      "Answer in 2-4 concise, actionable sentences. No preamble.",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const generated = await askLocalLLM(prompt);
+    if (generated) {
+      answer = generated;
+      reasoning = "Chrome's on-device model (Gemini Nano) reasoned over the question and the information above.";
+    } else {
+      reasoning = entry?.reasoning || FALLBACK.reasoning;
+      answer = entry?.answer || FALLBACK.answer;
+    }
+  } else {
+    reasoning =
+      entry?.reasoning ||
+      (usingLive
+        ? "No on-device model available on this browser to reason over the live results — see the sources above."
+        : FALLBACK.reasoning);
+    answer =
+      entry?.answer ||
+      (usingLive
+        ? `No scripted answer for that exact question, and the local model isn't available on this browser to summarize the sources above for "${searchQuery}".`
+        : FALLBACK.answer);
+  }
+
+  await sleep(350);
+  yield { phase: "reason", text: reasoning };
+
+  await sleep(350);
+  yield { phase: "answer", text: answer, targetName: entry?.targetName };
 }

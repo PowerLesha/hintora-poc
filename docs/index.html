@@ -247,16 +247,21 @@
     <div class="callout callout-agent">
       <p>Try <strong>"Does this repo have any known security vulnerabilities?"</strong> or
       <strong>"How do I squash my last 3 commits?"</strong> in the panel's "Ask the agent" tab.
-      Two things happen for real: a screenshot of the tab is actually captured
-      (<code>chrome.tabs.captureVisibleTab</code>), and the step-by-step trace — vision,
-      search, reasoning, answer — is a genuine async pipeline, not a canned animation.</p>
-      <p>What's mocked, the same "leave it visible" approach as <code>matcher.ts</code>:
-      the vision understanding, the web search, and the reasoning over both are a small
-      lookup table in <code>lib/agent.ts</code>, not a model call. Its
-      <code>(query, screenshot) → steps</code> signature is the exact seam a real
-      vision LLM with a web-search tool would replace. When the answer maps back to
-      something clickable, a "Show me on the page" button spotlights it through the
-      same overlay the DOM-matcher mode uses.</p>
+      Three things happen for real when the browser supports them: a screenshot of the
+      tab is actually captured, a real DuckDuckGo search runs (no API key), and the
+      reasoning/answer step runs through <strong>Chrome's built-in on-device model</strong>
+      (the Prompt API, Gemini Nano) if <code>chrome://flags</code> → "Prompt API for
+      Gemini Nano" is enabled — no network call, no cost, it runs on your machine.</p>
+      <p>Each of those three degrades gracefully to a small scripted knowledge base in
+      <code>lib/agent.ts</code> when it isn't available (offline, DuckDuckGo blocking
+      the request, or the on-device model not enabled) — and the trace says which path
+      actually ran, rather than hiding it. When the answer maps back to something
+      clickable, a "Show me on the page" button spotlights it through the same overlay
+      the DOM-matcher mode uses.</p>
+      <p>It doesn't only wait to be asked, either: close the panel back down to just the
+      floating bubble and, a few seconds later, it can nudge on its own — a small
+      callout offering to check something, no typed question involved. Accepting it
+      runs the exact same pipeline a typed question would.</p>
     </div>
   </section>
 
@@ -265,7 +270,7 @@
     <table class="mapping">
       <tr><td>TypeScript, browser extensions, injected scripts, DOM understanding, overlays</td><td>the extension itself — <code>extension-src/</code></td></tr>
       <tr><td>Node, Next.js, Postgres/Supabase</td><td><code>backend/</code>, a Next.js API route with SQLite standing in for Postgres so trying this costs nothing and needs no account</td></tr>
-      <tr><td>AI agents/copilots, RAG</td><td>not a real LLM call, since the brief says that isn't needed — but <code>matcher.ts</code>'s <code>(query, candidates) → ranked matches</code> interface is the seam, and the confirmed-resolutions table is the retrieval corpus a RAG version would query. <code>lib/agent.ts</code>'s "Ask the agent" mode applies the same idea to screenshots and web knowledge: a real screenshot capture and a real step-by-step pipeline, with only the vision/search/reasoning call itself mocked</td></tr>
+      <tr><td>AI agents/copilots, RAG</td><td><code>matcher.ts</code>'s DOM matching isn't a real LLM call, since the brief says that isn't needed — but its <code>(query, candidates) → ranked matches</code> interface is the seam, and the confirmed-resolutions table is the retrieval corpus a RAG version would query. <code>lib/agent.ts</code>'s "Ask the agent" mode goes further: real screenshot, real DuckDuckGo search, real reasoning via Chrome's on-device LLM when available, each with a scripted fallback when it isn't</td></tr>
     </table>
   </section>
 
