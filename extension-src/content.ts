@@ -6,8 +6,9 @@
 // falls back to the static per-site hints only.
 import { scan } from "./lib/domScanner";
 import { match, tokenize } from "./lib/matcher";
-import { boostFor, examplesFor } from "./lib/siteHints";
+import { boostFor, examplesFor, agentExamplesFor } from "./lib/siteHints";
 import { overlay } from "./lib/overlay";
+import { run as runAgent } from "./lib/agent";
 import type { Candidate, DynamicHint, RankedCandidate } from "./types";
 
 const CONFIDENCE_THRESHOLD = 2; // below this, admit uncertainty instead of guessing
@@ -51,7 +52,15 @@ let status: HTMLDivElement;
 let chipsEl: HTMLDivElement;
 let feedbackEl: HTMLDivElement;
 let sendBtn: HTMLButtonElement;
+let modeToggleEls: HTMLButtonElement[];
+let traceEl: HTMLDivElement;
+let answerEl: HTMLDivElement;
 let activeWorkflowCleanup: (() => void) | null = null;
+
+// "On this page" (existing DOM matcher) vs "Ask the agent" (screenshot +
+// mocked web search/reasoning, see lib/agent.ts). Same input box, different
+// pipeline behind Ask/Enter.
+let mode: "page" | "agent" = "page";
 
 // Past confirmed resolutions for this hostname, fetched once on load from
 // the backend. Empty array (not an error state) if the backend is
@@ -107,6 +116,10 @@ function buildWidget(): void {
       <button type="button" class="hintora-icon-btn" data-close aria-label="Close">${CLOSE_ICON}</button>
     </div>
     <div class="hintora-panel-body">
+      <div class="hintora-mode-toggle">
+        <button type="button" class="hintora-mode-btn hintora-mode-active" data-mode="page">On this page</button>
+        <button type="button" class="hintora-mode-btn" data-mode="agent">Ask the agent</button>
+      </div>
       <div class="hintora-input-row">
         <input type="text" placeholder="What are you trying to do?" />
         <button type="button" data-send>Ask</button>
@@ -114,6 +127,8 @@ function buildWidget(): void {
       <div class="hintora-chips"></div>
       <div class="hintora-status"></div>
       <div class="hintora-feedback hintora-hidden"></div>
+      <div class="hintora-trace hintora-hidden"></div>
+      <div class="hintora-answer hintora-hidden"></div>
     </div>
   `;
 
@@ -126,6 +141,9 @@ function buildWidget(): void {
   chipsEl = panel.querySelector(".hintora-chips")!;
   feedbackEl = panel.querySelector(".hintora-feedback")!;
   sendBtn = panel.querySelector("[data-send]")!;
+  modeToggleEls = Array.from(panel.querySelectorAll(".hintora-mode-btn"));
+  traceEl = panel.querySelector(".hintora-trace")!;
+  answerEl = panel.querySelector(".hintora-answer")!;
 
   renderChips(examplesFor(location.hostname));
 
@@ -137,14 +155,34 @@ function buildWidget(): void {
     panel.classList.add("hintora-hidden");
     overlay.hide();
   });
-  sendBtn.addEventListener("click", () => runQuery(input.value));
+  for (const btn of modeToggleEls) {
+    btn.addEventListener("click", () => setMode(btn.dataset.mode as "page" | "agent"));
+  }
+  const runActive = () => (mode === "page" ? runQuery(input.value) : runAgentQuery(input.value));
+  sendBtn.addEventListener("click", runActive);
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") runQuery(input.value);
+    if (e.key === "Enter") runActive();
     if (e.key === "Escape") {
       panel.classList.add("hintora-hidden");
       overlay.hide();
     }
   });
+}
+
+function setMode(newMode: "page" | "agent"): void {
+  mode = newMode;
+  for (const btn of modeToggleEls) btn.classList.toggle("hintora-mode-active", btn.dataset.mode === newMode);
+  cleanupWorkflow();
+  overlay.hide();
+  hideFeedback();
+  traceEl.classList.add("hintora-hidden");
+  traceEl.innerHTML = "";
+  answerEl.classList.add("hintora-hidden");
+  answerEl.innerHTML = "";
+  setStatus("");
+  input.value = "";
+  input.placeholder = newMode === "page" ? "What are you trying to do?" : "Ask a how-to question…";
+  renderChips(newMode === "page" ? examplesFor(location.hostname) : agentExamplesFor(location.hostname));
 }
 
 function renderChips(examples: string[]): void {
@@ -156,7 +194,8 @@ function renderChips(examples: string[]): void {
     chip.textContent = ex;
     chip.addEventListener("click", () => {
       input.value = ex;
-      runQuery(ex);
+      if (mode === "page") runQuery(ex);
+      else runAgentQuery(ex);
     });
     chipsEl.appendChild(chip);
   }
@@ -296,6 +335,110 @@ function showStep(target: Candidate, query: string, stepLabel?: string): void {
     };
     target.el.addEventListener("click", onClick, { capture: true, once: true });
     activeWorkflowCleanup = () => target.el.removeEventListener("click", onClick, { capture: true } as EventListenerOptions);
+  }
+}
+
+// Real screenshot capture, relayed through background.ts the same way the
+// backend fetch is (a content script can't call chrome.tabs.* itself).
+function captureScreenshot(): Promise<string | null> {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ type: "HINTORA_CAPTURE_SCREENSHOT" }, (res) => resolve(res?.dataUrl || null));
+  });
+}
+
+function addTraceStep(id: string, text: string, pending: boolean, sources?: { title: string; url: string }[]): void {
+  const row = document.createElement("div");
+  row.className = "hintora-trace-step";
+  row.dataset.stepId = id;
+
+  const icon = document.createElement("div");
+  icon.className = "hintora-trace-icon";
+  icon.innerHTML = pending ? `<div class="hintora-trace-spinner"></div>` : CHECK_ICON;
+
+  const textWrap = document.createElement("div");
+  const textEl = document.createElement("div");
+  textEl.className = "hintora-trace-text";
+  textEl.textContent = text;
+  textWrap.appendChild(textEl);
+
+  if (sources?.length) {
+    const list = document.createElement("ul");
+    list.className = "hintora-trace-sources";
+    for (const s of sources) {
+      const li = document.createElement("li");
+      li.textContent = `${s.title} — ${s.url}`;
+      list.appendChild(li);
+    }
+    textWrap.appendChild(list);
+  }
+
+  row.appendChild(icon);
+  row.appendChild(textWrap);
+  traceEl.appendChild(row);
+}
+
+function updateTraceStep(id: string, text: string): void {
+  const row = traceEl.querySelector<HTMLDivElement>(`[data-step-id="${id}"]`);
+  if (!row) return;
+  row.querySelector(".hintora-trace-icon")!.innerHTML = CHECK_ICON;
+  row.querySelector(".hintora-trace-text")!.textContent = text;
+}
+
+function formatAnswer(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+}
+
+function renderAnswer(text: string, targetName: string | undefined, query: string): void {
+  answerEl.classList.remove("hintora-hidden");
+  answerEl.innerHTML = "";
+
+  const body = document.createElement("div");
+  body.innerHTML = formatAnswer(text);
+  answerEl.appendChild(body);
+
+  const caption = document.createElement("div");
+  caption.className = "hintora-answer-caption";
+  caption.textContent = "Search + reasoning are mocked for this demo — see lib/agent.ts.";
+  answerEl.appendChild(caption);
+
+  if (targetName) {
+    const found = scan(document).find((c) => c.name.toLowerCase().includes(targetName.toLowerCase()));
+    if (found) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "Show me on the page";
+      btn.addEventListener("click", () => showStep(found, query, "From the agent's answer"));
+      answerEl.appendChild(btn);
+    }
+  }
+}
+
+async function runAgentQuery(rawQuery: string): Promise<void> {
+  const query = (rawQuery || "").trim();
+  if (!query) return;
+  cleanupWorkflow();
+  hideFeedback();
+  overlay.hide();
+
+  answerEl.classList.add("hintora-hidden");
+  answerEl.innerHTML = "";
+  traceEl.classList.remove("hintora-hidden");
+  traceEl.innerHTML = "";
+  setStatus("");
+
+  addTraceStep("capture", "Capturing a screenshot of this tab…", true);
+  const screenshot = await captureScreenshot();
+  updateTraceStep(
+    "capture",
+    screenshot ? "Captured a screenshot of this tab." : "Couldn't capture a screenshot on this page."
+  );
+
+  for await (const step of runAgent(query, screenshot)) {
+    addTraceStep(step.phase, step.text, false, step.sources);
+    if (step.phase === "answer") renderAnswer(step.text, step.targetName, query);
   }
 }
 

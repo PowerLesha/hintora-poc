@@ -51,3 +51,18 @@ export function boostFor(hostname: string): BoostFn | null {
 export function examplesFor(hostname: string): string[] {
   return EXAMPLES[hostname] || ["How do I find the settings?", "How do I sign out?"];
 }
+
+// Example prompts for "Ask the agent" mode (see lib/agent.ts): questions that
+// need outside knowledge or web search, not just a label on the page.
+const AGENT_EXAMPLES: Record<string, string[]> = {
+  "github.com": [
+    "Does this repo have any known security vulnerabilities?",
+    "How do I contribute here for the first time?",
+    "How do I squash my last 3 commits?",
+    "Can I use this in a commercial project?",
+  ],
+};
+
+export function agentExamplesFor(hostname: string): string[] {
+  return AGENT_EXAMPLES[hostname] || ["Can I use this in a commercial project?", "How do I squash my last 3 commits?"];
+}

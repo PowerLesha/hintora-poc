@@ -215,6 +215,17 @@
   function examplesFor(hostname) {
     return EXAMPLES[hostname] || ["How do I find the settings?", "How do I sign out?"];
   }
+  var AGENT_EXAMPLES = {
+    "github.com": [
+      "Does this repo have any known security vulnerabilities?",
+      "How do I contribute here for the first time?",
+      "How do I squash my last 3 commits?",
+      "Can I use this in a commercial project?"
+    ]
+  };
+  function agentExamplesFor(hostname) {
+    return AGENT_EXAMPLES[hostname] || ["Can I use this in a commercial project?", "How do I squash my last 3 commits?"];
+  }
 
   // lib/overlay.ts
   var box = null;
@@ -303,6 +314,101 @@
   }
   var overlay = { show, hide };
 
+  // lib/agent.ts
+  var KNOWLEDGE_BASE = [
+    {
+      triggerTokens: ["security", "vulnerab", "cve", "dependab", "safe"],
+      visionNote: "Screenshot shows a GitHub repo page with the usual tab bar (Code, Issues, Pull requests, Security\u2026).",
+      searchQuery: "how to check a github repo for known dependency vulnerabilities",
+      sources: [
+        { title: "About Dependabot alerts", url: "docs.github.com/code-security/dependabot" },
+        { title: "Viewing and updating vulnerable dependencies", url: "docs.github.com/code-security/supply-chain-security" }
+      ],
+      reasoning: "The page has a Security tab, which is where GitHub surfaces Dependabot alerts for known CVEs in this repo's dependency manifest.",
+      answer: "Open the **Security** tab on this repo, then **Dependabot alerts** \u2014 GitHub already scans the dependency manifest for known CVEs and lists any it finds there.",
+      targetName: "security"
+    },
+    {
+      triggerTokens: ["contribute", "contributing", "firsttime", "first", "beginner", "newcomer"],
+      visionNote: "Screenshot shows a public GitHub repo \u2014 contribution flow here starts from the Issues tab, not a special onboarding page.",
+      searchQuery: "how to make a first open source contribution on github",
+      sources: [
+        { title: "How to Contribute to Open Source", url: "opensource.guide/how-to-contribute" },
+        { title: "First contributions", url: "github.com/firstcontributions/first-contributions" }
+      ],
+      reasoning: "Most repos label a subset of open issues for newcomers; the fastest real entry point is the Issues tab filtered to that label, plus whatever CONTRIBUTING.md documents for this specific repo.",
+      answer: "Check this repo's **CONTRIBUTING.md** for its specific process, then look at the **Issues** tab for anything tagged `good first issue` \u2014 that's the usual entry point for a first PR.",
+      targetName: "issues"
+    },
+    {
+      triggerTokens: ["squash", "rebase", "commit", "commits", "history", "cleanup"],
+      visionNote: "This one doesn't depend on what's on screen \u2014 it's general git usage.",
+      searchQuery: "how to squash the last n commits with git rebase",
+      sources: [
+        { title: "Git rebase \u2014 interactive mode", url: "git-scm.com/docs/git-rebase" },
+        { title: "About Git rebase", url: "docs.github.com/get-started/using-git/about-git-rebase" }
+      ],
+      reasoning: "Squashing a fixed number of trailing commits is the textbook use of interactive rebase, not a GitHub UI feature, so the answer is a command, not a button on this page.",
+      answer: "Run `git rebase -i HEAD~3`, change `pick` to `squash` (or `s`) on the commits you want folded into the one above them, save, then write the combined commit message when prompted."
+    },
+    {
+      triggerTokens: ["license", "commercial", "permissive", "copyleft", "mit", "apache"],
+      visionNote: "Screenshot shows the repo's sidebar, which usually names the license directly.",
+      searchQuery: "what does this open source license allow for commercial use",
+      sources: [
+        { title: "Choose a License", url: "choosealicense.com" },
+        { title: "Licensing a repository", url: "docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository" }
+      ],
+      reasoning: "The license named in the repo sidebar determines this, not anything specific to GitHub's own features.",
+      answer: "Check the license named in the repo sidebar. Permissive licenses like **MIT** or **Apache 2.0** allow commercial use with attribution; copyleft licenses (e.g. GPL) can require you to release your own source too \u2014 read the actual license text before shipping."
+    }
+  ];
+  var FALLBACK = {
+    visionNote: "Screenshot captured. This demo agent only reasons over a handful of scripted topics, so treat this step as a stand-in for real vision understanding.",
+    searchQuery: "",
+    sources: [],
+    reasoning: "No canned answer matches this question closely enough to fake confidently.",
+    answer: "This demo agent only knows a few scripted answers \u2014 try one of the example chips. A real version would send the screenshot and this question to a vision-capable LLM with a web-search tool instead of a lookup table (see the comment at the top of `lib/agent.ts`)."
+  };
+  function pickEntry(query) {
+    const qTokens = tokenize(query);
+    let best = null;
+    let bestScore = 0;
+    for (const entry of KNOWLEDGE_BASE) {
+      let score = 0;
+      for (const t of qTokens) {
+        if (entry.triggerTokens.some((trig) => t.includes(trig) || trig.includes(t))) score += 1;
+      }
+      if (score > bestScore) {
+        best = entry;
+        bestScore = score;
+      }
+    }
+    return bestScore > 0 ? best : null;
+  }
+  function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  async function* run(query, screenshotDataUrl) {
+    const entry = pickEntry(query);
+    const e = entry || FALLBACK;
+    await sleep(500);
+    yield {
+      phase: "vision",
+      text: screenshotDataUrl ? e.visionNote : "Couldn't capture a screenshot on this page (blocked page or missing permission) \u2014 reasoning on the question alone."
+    };
+    await sleep(650);
+    if (entry) {
+      yield { phase: "search", text: `Searching the web for "${e.searchQuery}"\u2026`, sources: e.sources };
+    } else {
+      yield { phase: "search", text: "No confident search query for this one \u2014 falling back to a scripted answer." };
+    }
+    await sleep(700);
+    yield { phase: "reason", text: e.reasoning };
+    await sleep(500);
+    yield { phase: "answer", text: e.answer, targetName: entry?.targetName };
+  }
+
   // content.ts
   var CONFIDENCE_THRESHOLD = 2;
   var MARK_ICON = `<svg class="hintora-mark-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10V4H10"/><path d="M14 4H20V10"/><path d="M4 14V20H10"/><path d="M20 14V20H14"/><circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/></svg>`;
@@ -324,7 +430,11 @@
   var chipsEl;
   var feedbackEl;
   var sendBtn;
+  var modeToggleEls;
+  var traceEl;
+  var answerEl;
   var activeWorkflowCleanup = null;
+  var mode = "page";
   var dynamicHints = [];
   chrome.runtime.sendMessage({ type: "HINTORA_GET_HINTS", hostname: location.hostname }, (res) => {
     if (res?.hints) dynamicHints = res.hints;
@@ -367,6 +477,10 @@
       <button type="button" class="hintora-icon-btn" data-close aria-label="Close">${CLOSE_ICON}</button>
     </div>
     <div class="hintora-panel-body">
+      <div class="hintora-mode-toggle">
+        <button type="button" class="hintora-mode-btn hintora-mode-active" data-mode="page">On this page</button>
+        <button type="button" class="hintora-mode-btn" data-mode="agent">Ask the agent</button>
+      </div>
       <div class="hintora-input-row">
         <input type="text" placeholder="What are you trying to do?" />
         <button type="button" data-send>Ask</button>
@@ -374,6 +488,8 @@
       <div class="hintora-chips"></div>
       <div class="hintora-status"></div>
       <div class="hintora-feedback hintora-hidden"></div>
+      <div class="hintora-trace hintora-hidden"></div>
+      <div class="hintora-answer hintora-hidden"></div>
     </div>
   `;
     root.appendChild(bubble);
@@ -384,6 +500,9 @@
     chipsEl = panel.querySelector(".hintora-chips");
     feedbackEl = panel.querySelector(".hintora-feedback");
     sendBtn = panel.querySelector("[data-send]");
+    modeToggleEls = Array.from(panel.querySelectorAll(".hintora-mode-btn"));
+    traceEl = panel.querySelector(".hintora-trace");
+    answerEl = panel.querySelector(".hintora-answer");
     renderChips(examplesFor(location.hostname));
     bubble.addEventListener("click", () => {
       panel.classList.toggle("hintora-hidden");
@@ -393,14 +512,33 @@
       panel.classList.add("hintora-hidden");
       overlay.hide();
     });
-    sendBtn.addEventListener("click", () => runQuery(input.value));
+    for (const btn of modeToggleEls) {
+      btn.addEventListener("click", () => setMode(btn.dataset.mode));
+    }
+    const runActive = () => mode === "page" ? runQuery(input.value) : runAgentQuery(input.value);
+    sendBtn.addEventListener("click", runActive);
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") runQuery(input.value);
+      if (e.key === "Enter") runActive();
       if (e.key === "Escape") {
         panel.classList.add("hintora-hidden");
         overlay.hide();
       }
     });
+  }
+  function setMode(newMode) {
+    mode = newMode;
+    for (const btn of modeToggleEls) btn.classList.toggle("hintora-mode-active", btn.dataset.mode === newMode);
+    cleanupWorkflow();
+    overlay.hide();
+    hideFeedback();
+    traceEl.classList.add("hintora-hidden");
+    traceEl.innerHTML = "";
+    answerEl.classList.add("hintora-hidden");
+    answerEl.innerHTML = "";
+    setStatus("");
+    input.value = "";
+    input.placeholder = newMode === "page" ? "What are you trying to do?" : "Ask a how-to question\u2026";
+    renderChips(newMode === "page" ? examplesFor(location.hostname) : agentExamplesFor(location.hostname));
   }
   function renderChips(examples) {
     chipsEl.innerHTML = "";
@@ -411,7 +549,8 @@
       chip.textContent = ex;
       chip.addEventListener("click", () => {
         input.value = ex;
-        runQuery(ex);
+        if (mode === "page") runQuery(ex);
+        else runAgentQuery(ex);
       });
       chipsEl.appendChild(chip);
     }
@@ -528,6 +667,89 @@
       };
       target.el.addEventListener("click", onClick, { capture: true, once: true });
       activeWorkflowCleanup = () => target.el.removeEventListener("click", onClick, { capture: true });
+    }
+  }
+  function captureScreenshot() {
+    return new Promise((resolve) => {
+      chrome.runtime.sendMessage({ type: "HINTORA_CAPTURE_SCREENSHOT" }, (res) => resolve(res?.dataUrl || null));
+    });
+  }
+  function addTraceStep(id, text, pending, sources) {
+    const row = document.createElement("div");
+    row.className = "hintora-trace-step";
+    row.dataset.stepId = id;
+    const icon = document.createElement("div");
+    icon.className = "hintora-trace-icon";
+    icon.innerHTML = pending ? `<div class="hintora-trace-spinner"></div>` : CHECK_ICON;
+    const textWrap = document.createElement("div");
+    const textEl = document.createElement("div");
+    textEl.className = "hintora-trace-text";
+    textEl.textContent = text;
+    textWrap.appendChild(textEl);
+    if (sources?.length) {
+      const list = document.createElement("ul");
+      list.className = "hintora-trace-sources";
+      for (const s of sources) {
+        const li = document.createElement("li");
+        li.textContent = `${s.title} \u2014 ${s.url}`;
+        list.appendChild(li);
+      }
+      textWrap.appendChild(list);
+    }
+    row.appendChild(icon);
+    row.appendChild(textWrap);
+    traceEl.appendChild(row);
+  }
+  function updateTraceStep(id, text) {
+    const row = traceEl.querySelector(`[data-step-id="${id}"]`);
+    if (!row) return;
+    row.querySelector(".hintora-trace-icon").innerHTML = CHECK_ICON;
+    row.querySelector(".hintora-trace-text").textContent = text;
+  }
+  function formatAnswer(text) {
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  }
+  function renderAnswer(text, targetName, query) {
+    answerEl.classList.remove("hintora-hidden");
+    answerEl.innerHTML = "";
+    const body = document.createElement("div");
+    body.innerHTML = formatAnswer(text);
+    answerEl.appendChild(body);
+    const caption = document.createElement("div");
+    caption.className = "hintora-answer-caption";
+    caption.textContent = "Search + reasoning are mocked for this demo \u2014 see lib/agent.ts.";
+    answerEl.appendChild(caption);
+    if (targetName) {
+      const found = scan(document).find((c) => c.name.toLowerCase().includes(targetName.toLowerCase()));
+      if (found) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = "Show me on the page";
+        btn.addEventListener("click", () => showStep(found, query, "From the agent's answer"));
+        answerEl.appendChild(btn);
+      }
+    }
+  }
+  async function runAgentQuery(rawQuery) {
+    const query = (rawQuery || "").trim();
+    if (!query) return;
+    cleanupWorkflow();
+    hideFeedback();
+    overlay.hide();
+    answerEl.classList.add("hintora-hidden");
+    answerEl.innerHTML = "";
+    traceEl.classList.remove("hintora-hidden");
+    traceEl.innerHTML = "";
+    setStatus("");
+    addTraceStep("capture", "Capturing a screenshot of this tab\u2026", true);
+    const screenshot = await captureScreenshot();
+    updateTraceStep(
+      "capture",
+      screenshot ? "Captured a screenshot of this tab." : "Couldn't capture a screenshot on this page."
+    );
+    for await (const step of run(query, screenshot)) {
+      addTraceStep(step.phase, step.text, false, step.sources);
+      if (step.phase === "answer") renderAnswer(step.text, step.targetName, query);
     }
   }
   buildWidget();

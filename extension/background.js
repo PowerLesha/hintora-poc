@@ -95,20 +95,38 @@
       clearTimeout(timer);
     }
   }
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg?.type === "HINTORA_GET_HINTS") {
-      backendFetch(`/api/resolutions?hostname=${encodeURIComponent(msg.hostname)}`).then((data) => {
-        sendResponse({ hints: data?.hints || [] });
+  function captureScreenshot(windowId) {
+    return new Promise((resolve) => {
+      if (windowId == null) {
+        resolve(null);
+        return;
+      }
+      chrome.tabs.captureVisibleTab(windowId, { format: "jpeg", quality: 60 }, (dataUrl) => {
+        void chrome.runtime.lastError;
+        resolve(dataUrl || null);
       });
-      return true;
+    });
+  }
+  chrome.runtime.onMessage.addListener(
+    (msg, sender, sendResponse) => {
+      if (msg?.type === "HINTORA_GET_HINTS") {
+        backendFetch(`/api/resolutions?hostname=${encodeURIComponent(msg.hostname)}`).then((data) => {
+          sendResponse({ hints: data?.hints || [] });
+        });
+        return true;
+      }
+      if (msg?.type === "HINTORA_LOG") {
+        backendFetch("/api/resolutions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(msg.payload)
+        }).then((data) => sendResponse({ ok: !!data }));
+        return true;
+      }
+      if (msg?.type === "HINTORA_CAPTURE_SCREENSHOT") {
+        captureScreenshot(sender.tab?.windowId).then((dataUrl) => sendResponse({ dataUrl }));
+        return true;
+      }
     }
-    if (msg?.type === "HINTORA_LOG") {
-      backendFetch("/api/resolutions", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(msg.payload)
-      }).then((data) => sendResponse({ ok: !!data }));
-      return true;
-    }
-  });
+  );
 })();

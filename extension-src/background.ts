@@ -136,19 +136,48 @@ interface LogMessage {
   payload: unknown;
 }
 
-chrome.runtime.onMessage.addListener((msg: GetHintsMessage | LogMessage, _sender, sendResponse) => {
-  if (msg?.type === "HINTORA_GET_HINTS") {
-    backendFetch(`/api/resolutions?hostname=${encodeURIComponent(msg.hostname)}`).then((data: any) => {
-      sendResponse({ hints: data?.hints || [] });
+interface CaptureScreenshotMessage {
+  type: "HINTORA_CAPTURE_SCREENSHOT";
+}
+
+// Real screenshot capture for "Ask the agent" mode (see lib/agent.ts): a
+// content script can't call chrome.tabs.* itself, so it relays through
+// here, the same reason background.ts already relays backend fetches.
+// Uses "activeTab" (granted for a tab once the user invokes the extension
+// on it via the toolbar icon) rather than a broad <all_urls> host
+// permission, to keep the permission footprint minimal.
+function captureScreenshot(windowId: number | undefined): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (windowId == null) {
+      resolve(null);
+      return;
+    }
+    chrome.tabs.captureVisibleTab(windowId, { format: "jpeg", quality: 60 }, (dataUrl) => {
+      void chrome.runtime.lastError; // e.g. chrome:// pages or missing activeTab grant
+      resolve(dataUrl || null);
     });
-    return true; // keep the message channel open for the async response
+  });
+}
+
+chrome.runtime.onMessage.addListener(
+  (msg: GetHintsMessage | LogMessage | CaptureScreenshotMessage, sender, sendResponse) => {
+    if (msg?.type === "HINTORA_GET_HINTS") {
+      backendFetch(`/api/resolutions?hostname=${encodeURIComponent(msg.hostname)}`).then((data: any) => {
+        sendResponse({ hints: data?.hints || [] });
+      });
+      return true; // keep the message channel open for the async response
+    }
+    if (msg?.type === "HINTORA_LOG") {
+      backendFetch("/api/resolutions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(msg.payload),
+      }).then((data) => sendResponse({ ok: !!data }));
+      return true;
+    }
+    if (msg?.type === "HINTORA_CAPTURE_SCREENSHOT") {
+      captureScreenshot(sender.tab?.windowId).then((dataUrl) => sendResponse({ dataUrl }));
+      return true;
+    }
   }
-  if (msg?.type === "HINTORA_LOG") {
-    backendFetch("/api/resolutions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(msg.payload),
-    }).then((data) => sendResponse({ ok: !!data }));
-    return true;
-  }
-});
+);

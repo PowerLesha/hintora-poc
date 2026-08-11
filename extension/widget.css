@@ -14,16 +14,24 @@
   --hintora-radius-lg: 18px;
   --hintora-radius-md: 12px;
   --hintora-radius-sm: 9px;
-  --hintora-shadow-lg: 0 24px 60px rgba(10, 7, 26, 0.55), 0 2px 10px rgba(0, 0, 0, 0.3);
+  --hintora-shadow-lg:
+    0 24px 60px rgba(10, 7, 26, 0.55), 0 2px 10px rgba(0, 0, 0, 0.3);
 
   position: fixed;
   bottom: 20px;
   right: 20px;
   z-index: 2147483002;
-  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font:
+    13px/1.5 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
   color: var(--hintora-text);
 }
-#hintora-root * { box-sizing: border-box; }
+#hintora-root * {
+  box-sizing: border-box;
+}
 
 /* Spotlight + callout (the guidance overlay) */
 .hintora-spotlight {
@@ -32,13 +40,24 @@
   z-index: 2147483000;
   border: 2px solid var(--hintora-accent-solid, #6d5bff);
   border-radius: 10px;
-  box-shadow: 0 0 0 4px rgba(139, 107, 255, 0.28), 0 0 0 9999px rgba(10, 8, 22, 0.4);
+  box-shadow:
+    0 0 0 4px rgba(139, 107, 255, 0.28),
+    0 0 0 9999px rgba(10, 8, 22, 0.4);
   pointer-events: none;
   animation: hintora-pulse 1.8s cubic-bezier(0.4, 0, 0.2, 1) infinite;
 }
 @keyframes hintora-pulse {
-  0%, 100% { box-shadow: 0 0 0 4px rgba(139, 107, 255, 0.28), 0 0 0 9999px rgba(10, 8, 22, 0.4); }
-  50% { box-shadow: 0 0 0 9px rgba(139, 107, 255, 0.12), 0 0 0 9999px rgba(10, 8, 22, 0.4); }
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 4px rgba(139, 107, 255, 0.28),
+      0 0 0 9999px rgba(10, 8, 22, 0.4);
+  }
+  50% {
+    box-shadow:
+      0 0 0 9px rgba(139, 107, 255, 0.12),
+      0 0 0 9999px rgba(10, 8, 22, 0.4);
+  }
 }
 
 .hintora-callout {
@@ -52,7 +71,12 @@
   padding: 10px 14px;
   border-radius: var(--hintora-radius-sm, 9px);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font:
+    13px/1.45 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
   box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
   pointer-events: none;
 }
@@ -77,7 +101,11 @@
   width: 52px;
   height: 52px;
   border-radius: 16px;
-  background: linear-gradient(135deg, var(--hintora-accent-1), var(--hintora-accent-2));
+  background: linear-gradient(
+    135deg,
+    var(--hintora-accent-1),
+    var(--hintora-accent-2)
+  );
   color: white;
   display: flex;
   align-items: center;
@@ -85,19 +113,38 @@
   cursor: pointer;
   box-shadow: 0 8px 24px rgba(91, 61, 240, 0.45);
   border: none;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
   animation: hintora-bubble-intro 1.6s cubic-bezier(0.4, 0, 0.2, 1) 1;
 }
-.hintora-bubble .hintora-mark-icon { width: 24px; height: 24px; }
+.hintora-bubble .hintora-mark-icon {
+  width: 24px;
+  height: 24px;
+}
 .hintora-bubble:hover {
   transform: translateY(-2px) scale(1.03);
   box-shadow: 0 10px 28px rgba(91, 61, 240, 0.55);
 }
-.hintora-bubble:active { transform: translateY(0) scale(0.98); }
+.hintora-bubble:active {
+  transform: translateY(0) scale(0.98);
+}
 @keyframes hintora-bubble-intro {
-  0% { box-shadow: 0 8px 24px rgba(91, 61, 240, 0.45), 0 0 0 0 rgba(139, 107, 255, 0.5); }
-  60% { box-shadow: 0 8px 24px rgba(91, 61, 240, 0.45), 0 0 0 14px rgba(139, 107, 255, 0); }
-  100% { box-shadow: 0 8px 24px rgba(91, 61, 240, 0.45), 0 0 0 0 rgba(139, 107, 255, 0); }
+  0% {
+    box-shadow:
+      0 8px 24px rgba(91, 61, 240, 0.45),
+      0 0 0 0 rgba(139, 107, 255, 0.5);
+  }
+  60% {
+    box-shadow:
+      0 8px 24px rgba(91, 61, 240, 0.45),
+      0 0 0 14px rgba(139, 107, 255, 0);
+  }
+  100% {
+    box-shadow:
+      0 8px 24px rgba(91, 61, 240, 0.45),
+      0 0 0 0 rgba(139, 107, 255, 0);
+  }
 }
 
 /* Panel */
@@ -106,6 +153,7 @@
   bottom: 62px;
   right: 0;
   width: 320px;
+  max-height: min(860px, calc(100vh - 100px));
   background: var(--hintora-bg);
   backdrop-filter: blur(18px) saturate(160%);
   border: 1px solid var(--hintora-border);
@@ -117,7 +165,9 @@
   flex-direction: column;
   transform-origin: bottom right;
   transform: scale(1) translateY(0);
-  transition: opacity 0.16s ease, transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition:
+    opacity 0.16s ease,
+    transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 .hintora-panel.hintora-hidden {
   transform: scale(0.94) translateY(6px);
@@ -130,6 +180,7 @@
   padding: 12px 12px 12px 14px;
   background: linear-gradient(135deg, var(--hintora-accent-1), #4a38c4);
   font-weight: 600;
+  flex-shrink: 0;
 }
 .hintora-logo-mark {
   width: 20px;
@@ -141,9 +192,16 @@
   justify-content: center;
   flex-shrink: 0;
 }
-.hintora-logo-mark .hintora-mark-icon { width: 12px; height: 12px; }
-.hintora-mark-icon { display: block; }
-.hintora-panel-header-title { flex: 1; }
+.hintora-logo-mark .hintora-mark-icon {
+  width: 12px;
+  height: 12px;
+}
+.hintora-mark-icon {
+  display: block;
+}
+.hintora-panel-header-title {
+  flex: 1;
+}
 .hintora-icon-btn {
   background: none;
   border: none;
@@ -156,13 +214,28 @@
   justify-content: center;
   cursor: pointer;
   opacity: 0.75;
-  transition: opacity 0.12s ease, background 0.12s ease;
+  transition:
+    opacity 0.12s ease,
+    background 0.12s ease;
 }
-.hintora-icon-btn:hover { opacity: 1; background: rgba(255, 255, 255, 0.14); }
+.hintora-icon-btn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.14);
+}
 
-.hintora-panel-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.hintora-panel-body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+  min-height: 0;
+}
 
-.hintora-input-row { display: flex; gap: 6px; }
+.hintora-input-row {
+  display: flex;
+  gap: 6px;
+}
 .hintora-input-row input {
   flex: 1;
   background: rgba(255, 255, 255, 0.05);
@@ -172,15 +245,23 @@
   padding: 8px 10px;
   font: inherit;
   outline: none;
-  transition: border-color 0.12s ease, background 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease;
 }
-.hintora-input-row input::placeholder { color: var(--hintora-text-dim); }
+.hintora-input-row input::placeholder {
+  color: var(--hintora-text-dim);
+}
 .hintora-input-row input:focus {
   border-color: var(--hintora-accent-solid);
   background: rgba(255, 255, 255, 0.07);
 }
 .hintora-input-row button {
-  background: linear-gradient(135deg, var(--hintora-accent-1), var(--hintora-accent-2));
+  background: linear-gradient(
+    135deg,
+    var(--hintora-accent-1),
+    var(--hintora-accent-2)
+  );
   border: none;
   color: white;
   border-radius: var(--hintora-radius-sm);
@@ -188,12 +269,22 @@
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  transition: filter 0.12s ease, transform 0.08s ease;
+  transition:
+    filter 0.12s ease,
+    transform 0.08s ease;
 }
-.hintora-input-row button:hover { filter: brightness(1.1); }
-.hintora-input-row button:active { transform: scale(0.97); }
+.hintora-input-row button:hover {
+  filter: brightness(1.1);
+}
+.hintora-input-row button:active {
+  transform: scale(0.97);
+}
 
-.hintora-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.hintora-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
 .hintora-chip {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid var(--hintora-border);
@@ -202,7 +293,11 @@
   padding: 5px 11px;
   font-size: 12px;
   cursor: pointer;
-  transition: border-color 0.12s ease, color 0.12s ease, transform 0.12s ease, background 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    transform 0.12s ease,
+    background 0.12s ease;
 }
 .hintora-chip:hover {
   border-color: var(--hintora-accent-solid);
@@ -217,7 +312,9 @@
   min-height: 16px;
   line-height: 1.45;
 }
-.hintora-status.hintora-status-error { color: var(--hintora-danger); }
+.hintora-status.hintora-status-error {
+  color: var(--hintora-danger);
+}
 
 .hintora-feedback {
   display: flex;
@@ -237,13 +334,144 @@
   justify-content: center;
   cursor: pointer;
   color: var(--hintora-text-dim);
-  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+  transition:
+    border-color 0.12s ease,
+    color 0.12s ease,
+    background 0.12s ease;
 }
-.hintora-fb-btn:hover { background: rgba(255, 255, 255, 0.08); }
-.hintora-fb-up:hover { border-color: #7ee0a8; color: #7ee0a8; }
-.hintora-fb-down:hover { border-color: var(--hintora-danger); color: var(--hintora-danger); }
+.hintora-fb-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+.hintora-fb-up:hover {
+  border-color: #7ee0a8;
+  color: #7ee0a8;
+}
+.hintora-fb-down:hover {
+  border-color: var(--hintora-danger);
+  color: var(--hintora-danger);
+}
 
 .hintora-hidden {
   opacity: 0;
   pointer-events: none;
+}
+
+/* Mode toggle: "On this page" (DOM matcher) vs "Ask the agent" */
+.hintora-mode-toggle {
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hintora-border);
+  border-radius: var(--hintora-radius-sm);
+  padding: 3px;
+}
+.hintora-mode-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--hintora-text-dim);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+.hintora-mode-btn.hintora-mode-active {
+  background: linear-gradient(
+    135deg,
+    var(--hintora-accent-1),
+    var(--hintora-accent-2)
+  );
+  color: white;
+}
+
+/* Agent trace: appears one step at a time as the mocked pipeline runs */
+.hintora-trace {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hintora-trace-step {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.hintora-trace-icon {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  margin-top: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--hintora-accent-2);
+}
+.hintora-trace-spinner {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--hintora-accent-solid);
+  animation: hintora-spin 0.7s linear infinite;
+}
+@keyframes hintora-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.hintora-trace-text {
+  font-size: 12px;
+  color: var(--hintora-text-dim);
+  line-height: 1.45;
+}
+.hintora-trace-sources {
+  margin: 4px 0 0;
+  padding-left: 16px;
+  font-size: 11px;
+  color: var(--hintora-text-dim);
+  opacity: 0.75;
+}
+.hintora-trace-sources li {
+  margin-bottom: 2px;
+}
+
+/* Agent answer card */
+.hintora-answer {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--hintora-border);
+  border-radius: var(--hintora-radius-md);
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hintora-answer strong {
+  color: white;
+}
+.hintora-answer-caption {
+  font-size: 11px;
+  color: var(--hintora-text-dim);
+  opacity: 0.75;
+}
+.hintora-answer button {
+  align-self: flex-start;
+  background: linear-gradient(
+    135deg,
+    var(--hintora-accent-1),
+    var(--hintora-accent-2)
+  );
+  border: none;
+  color: white;
+  border-radius: var(--hintora-radius-sm);
+  padding: 6px 12px;
+  font: inherit;
+  font-weight: 600;
+  font-size: 12px;
+  cursor: pointer;
 }

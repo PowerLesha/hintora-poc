@@ -41,6 +41,14 @@ opens bottom-right. Try a chip, or type your own:
   Click one and it's logged as a correction.
 - After any match, hit 👍. Refresh `localhost:3000` and it's there.
 
+Switch to the **Ask the agent** tab at the top of the panel for the other
+kind of question — one that needs outside knowledge, not just a page
+element. Try "Does this repo have any known security vulnerabilities?" or
+"How do I squash my last 3 commits?" and watch the trace: a real
+screenshot capture, then search/reasoning/answer steps arriving one at a
+time. See [Ask the agent](#ask-the-agent-libagentts-a-second-mode-also-mocked)
+for what's real here and what's mocked.
+
 It isn't GitHub-specific. The matcher runs against the accessible name of
 every interactive element on whatever page is open; GitHub is just the demo
 target because its DOM holds still long enough to record a walkthrough.
@@ -55,11 +63,12 @@ extension/            the loadable, pre-built extension (Chrome reads this)
   widget.css              spotlight / callout / panel styling
 
 extension-src/         TypeScript source, the actual thing to read or edit
-  content.ts              orchestrates: scan -> match -> overlay, widget UI, feedback loop
-  background.ts           toolbar click relay + backend fetch relay (see below)
+  content.ts              orchestrates: scan -> match -> overlay, widget UI, feedback loop, agent mode
+  background.ts           toolbar click relay + backend fetch relay + screenshot capture (see below)
   lib/domScanner.ts        page understanding: interactive elements -> accessible names
   lib/matcher.ts           intent understanding: query -> ranked element matches
-  lib/siteHints.ts         static per-site score boosts + example prompts
+  lib/agent.ts             "Ask the agent" mode: screenshot + mocked web search/reasoning -> answer
+  lib/siteHints.ts         static per-site score boosts + example prompts (both modes)
   lib/overlay.ts           spotlight/callout rendering, tracks and self-heals
   types.ts                shared interfaces
   build.mjs               esbuild config, bundles the above into extension/*.js
@@ -125,6 +134,42 @@ substring check plus a per-site hint saves it. A real matcher would use
 embeddings so it doesn't need a growing patch list for every
 plural/synonym/homonym gap like this one.
 
+## Ask the agent (`lib/agent.ts`), a second mode, also mocked
+
+The panel has a second tab next to "On this page": **Ask the agent**. It's
+for the class of question the DOM matcher above can't answer at all —
+"Does this repo have any known security vulnerabilities?", "How do I
+squash my last 3 commits?" — questions that need outside knowledge or a
+web search, not just a label already sitting on the page.
+
+Two things in this mode are real, not simulated:
+
+- **The screenshot.** Submitting a query calls `chrome.tabs.captureVisibleTab`
+  (relayed through `background.ts`, the same reason the backend fetch is:
+  a content script can't call `chrome.tabs.*` itself). It's an actual
+  capture of the actual tab, gated on the `activeTab` permission rather
+  than a broad `<all_urls>` host permission.
+- **The trace.** The panel renders each step as it arrives from an
+  `async function*`, in order, with real delays between phases — it isn't
+  a canned animation dressed up to look like a pipeline.
+
+What's mocked, same as `matcher.ts`: the vision understanding, the web
+search, and the reasoning over both are a small lookup table in
+`lib/agent.ts` keyed on a handful of trigger words, not a model call. Its
+exported `run(query, screenshotDataUrl) -> AsyncGenerator<AgentStep>` is
+the seam: a real version would swap the body for one call to a
+vision-capable LLM with a web-search tool (e.g. Claude given the
+screenshot as an image block plus the `web_search` tool), streaming its
+own tool-use/reasoning/answer events into this same step shape — nothing
+in `content.ts` downstream of that call would need to change. Ask it
+something outside the handful of scripted topics and it says so, rather
+than guessing an answer with fake confidence.
+
+When an answer maps back to something clickable, it also shows a "Show me
+on the page" button that spotlights that element via the same `overlay`
+the DOM-matcher mode uses — the two modes end at the same guidance
+primitive, they just start from different kinds of question.
+
 ## Reliability loop (the backend)
 
 Three mechanisms answer "how would this get more reliable over time":
@@ -188,12 +233,20 @@ for arbitrary flows.
   `(query, candidates) -> ranked matches` interface is the seam where one
   would go, and the backend's confirmed-resolutions table is the retrieval
   corpus a RAG-style version would query instead of, or alongside, the
-  static hint table.
+  static hint table. `lib/agent.ts`'s "Ask the agent" mode is the same idea
+  applied to screenshots and web knowledge instead of the DOM: a real
+  screenshot capture and a real step-by-step async pipeline, with only the
+  vision/search/reasoning call itself mocked, at the exact seam
+  (`run(query, screenshotDataUrl)`) a vision LLM + web-search tool call
+  would replace.
 
 ## What's next if this were the real product
 
 - Swap `matcher.ts`'s body for the LLM call described above, so the
   callout text isn't just "Click here for '\<query\>'".
+- Swap `agent.ts`'s body for a real vision LLM + web-search tool call, so
+  "Ask the agent" answers arbitrary questions instead of a handful of
+  scripted ones.
 - A step-graph format for multi-step flows: a node holding an intent
   description, a resolution strategy, and an advance condition, authored
   by a customer or inferred from recorded successful task completions.
