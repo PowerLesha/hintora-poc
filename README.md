@@ -82,6 +82,7 @@ extension-src/         TypeScript source, the actual thing to read or edit
   lib/overlay.ts           spotlight/callout rendering, tracks and self-heals
   types.ts                shared interfaces
   build.mjs               esbuild config, bundles the above into extension/*.js
+  test/matcher.test.ts    matcher.ts ranking, checked in Node against a fixed candidate snapshot
 
 backend/               Next.js (TypeScript) + SQLite, the reliability store
   app/api/resolutions/route.ts   GET aggregated hints / POST a confirmation
@@ -143,6 +144,10 @@ stemming, so "issue" doesn't token-match "Issues" (plural); only a
 substring check plus a per-site hint saves it. A real matcher would use
 embeddings so it doesn't need a growing patch list for every
 plural/synonym/homonym gap like this one.
+
+`match()` and `tokenize()` take no DOM input, so `extension-src/test/`
+checks their ranking directly, in Node, against a fixed snapshot of a repo
+header's real candidates — `cd extension-src && npm test`.
 
 ## Ask the agent (`lib/agent.ts`), the default mode
 
