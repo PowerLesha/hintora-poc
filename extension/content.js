@@ -543,8 +543,7 @@
       phase: "vision",
       text: screenshotDataUrl ? entry?.visionNote || "Screenshot captured \u2014 reasoning on the question and whatever's on the page." : "Couldn't capture a screenshot on this page (blocked page, or the toolbar icon hasn't been clicked yet this tab) \u2014 reasoning on the question alone."
     };
-    const pageTitle = document.title.replace(/\s+/g, " ").trim().slice(0, 80);
-    const searchQuery = entry?.searchQuery || (pageTitle ? `${pageTitle} \u2014 ${query}` : query);
+    const searchQuery = entry?.searchQuery || query;
     const liveResults = await webSearch(searchQuery);
     const usingLive = liveResults.length > 0;
     const sources = usingLive ? liveResults.slice(0, 3).map((r) => ({ title: r.title, url: r.url })) : entry?.sources || [];
@@ -588,8 +587,10 @@ A: ${h.answer}`).join("\n\n") : "";
       const actionRequested = looksLikeActionRequest(query);
       const candidates = actionRequested ? scan(document).filter((c) => c.name) : [];
       const candidateList = candidates.slice(0, 40).map((c) => `- ${c.name} (${c.role})`).join("\n");
+      const pageTitle = document.title.replace(/\s+/g, " ").trim().slice(0, 80);
       const prompt = [
         `You are a browser assistant helping someone on ${location.hostname || "this site"}.`,
+        pageTitle ? `This page's title is: "${pageTitle}"` : "",
         historyBlock ? `Conversation so far:
 ${historyBlock}` : "",
         `New question: "${query}"`,

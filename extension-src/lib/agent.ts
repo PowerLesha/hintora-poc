@@ -251,10 +251,14 @@ export async function* run(
       : "Couldn't capture a screenshot on this page (blocked page, or the toolbar icon hasn't been clicked yet this tab) — reasoning on the question alone.",
   };
 
-  // "What does this project do?" means nothing to a web search on its own —
-  // folding in the page title grounds it in whatever page it was asked on.
-  const pageTitle = document.title.replace(/\s+/g, " ").trim().slice(0, 80);
-  const searchQuery = entry?.searchQuery || (pageTitle ? `${pageTitle} — ${query}` : query);
+  // The external search query is exactly the user's question (or the
+  // scripted entry's), never anything pulled off the current page — the
+  // page can be a Gmail inbox, a bank statement, anything, and its title
+  // or content has no business leaving the machine in a DuckDuckGo
+  // request. Page-title grounding for a deictic question like "what does
+  // this project do?" happens below, in the on-device LLM prompt only,
+  // which never leaves the device.
+  const searchQuery = entry?.searchQuery || query;
   const liveResults = await webSearch(searchQuery);
   const usingLive = liveResults.length > 0;
   const sources: AgentSource[] = usingLive
@@ -318,8 +322,10 @@ export async function* run(
       .slice(0, 40)
       .map((c) => `- ${c.name} (${c.role})`)
       .join("\n");
+    const pageTitle = document.title.replace(/\s+/g, " ").trim().slice(0, 80);
     const prompt = [
       `You are a browser assistant helping someone on ${location.hostname || "this site"}.`,
+      pageTitle ? `This page's title is: "${pageTitle}"` : "",
       historyBlock ? `Conversation so far:\n${historyBlock}` : "",
       `New question: "${query}"`,
       grounding ? `Relevant information:\n${grounding}` : "",
