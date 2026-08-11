@@ -70,7 +70,13 @@ export async function getLocalLLMStatus(): Promise<string> {
     if (model.availability) return await model.availability();
     if (model.capabilities) return (await model.capabilities()).available || "unavailable";
     return "available"; // API present with no capability check exposed; let create() below be the real test
-  } catch {
+  } catch (e) {
+    // Swallowed everywhere else in this file by design (see the file-level
+    // comment), but silently as "unavailable" here specifically hid a real
+    // discrepancy once — availability() throwing transiently (rate limiting,
+    // a session left mid-teardown) is indistinguishable from the API
+    // genuinely not existing without this log.
+    console.warn("[Hintora] LanguageModel.availability() threw:", e);
     return "unavailable";
   }
 }

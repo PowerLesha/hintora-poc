@@ -152,7 +152,8 @@
   position: absolute;
   bottom: 62px;
   right: 0;
-  width: 320px;
+  width: 420px;
+  max-width: calc(100vw - 40px);
   max-height: min(860px, calc(100vh - 100px));
   background: var(--hintora-bg);
   backdrop-filter: blur(18px) saturate(160%);
@@ -229,6 +230,7 @@
   flex-direction: column;
   gap: 10px;
   overflow-y: auto;
+  overflow-x: hidden;
   min-height: 0;
 }
 
@@ -389,7 +391,32 @@
   color: white;
 }
 
-/* Agent trace: appears one step at a time as the mocked pipeline runs */
+/* Agent conversation: one .hintora-turn per question, stacked so earlier
+   turns stay visible instead of being wiped on the next question. */
+.hintora-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.hintora-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--hintora-border);
+}
+.hintora-turn:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+.hintora-turn-question {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--hintora-text);
+  overflow-wrap: anywhere;
+}
+
+/* Agent trace: appears one step at a time as the agent pipeline runs */
 .hintora-trace {
   display: flex;
   flex-direction: column;
@@ -418,6 +445,54 @@
   border-top-color: var(--hintora-accent-solid);
   animation: hintora-spin 0.7s linear infinite;
 }
+
+/* "Model is thinking" loader (agent.ts's "reason" phase only): the same
+   viewfinder-brackets mark as the bubble/overlay, spinning around its own
+   center dot with a soft glow that breathes in and out, instead of a
+   generic spinner — the brand's own "actively focusing" motif, reused
+   rather than invented from scratch. */
+.hintora-thinking {
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.hintora-thinking .hintora-mark-icon {
+  width: 15px;
+  height: 15px;
+  color: var(--hintora-accent-2);
+  animation:
+    hintora-thinking-spin 2.4s cubic-bezier(0.65, 0, 0.35, 1) infinite,
+    hintora-thinking-glow 1.6s ease-in-out infinite;
+}
+.hintora-thinking .hintora-mark-icon circle {
+  animation: hintora-thinking-dot 1.6s ease-in-out infinite;
+  transform-origin: center;
+}
+@keyframes hintora-thinking-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes hintora-thinking-glow {
+  0%,
+  100% {
+    filter: drop-shadow(0 0 1px rgba(139, 107, 255, 0.3));
+  }
+  50% {
+    filter: drop-shadow(0 0 5px rgba(139, 107, 255, 0.9));
+  }
+}
+@keyframes hintora-thinking-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.2;
+  }
+}
 @keyframes hintora-spin {
   to {
     transform: rotate(360deg);
@@ -427,6 +502,7 @@
   font-size: 12px;
   color: var(--hintora-text-dim);
   line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 .hintora-trace-sources {
   margin: 4px 0 0;
@@ -437,6 +513,7 @@
 }
 .hintora-trace-sources li {
   margin-bottom: 2px;
+  overflow-wrap: anywhere;
 }
 
 /* Agent answer card */

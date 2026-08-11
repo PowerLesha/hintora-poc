@@ -173,12 +173,13 @@
     <span class="eyebrow">Hintora founding-engineer PoC</span>
     <h1>It reads the page like a screen reader would — then shows you where to click.</h1>
     <p class="lede">
-      A small Chrome extension: ask it what you're trying to do, and it finds the real
-      element on the page and spotlights it. A local backend logs which matches get
-      confirmed, so it gets sharper the more it's used. A second mode, "Ask the agent,"
-      captures a real screenshot of the tab and walks through a step-by-step
-      search/reasoning trace for questions that need outside knowledge, not just a
-      label on the page. No signup, no deployment, runs entirely on your own machine.
+      A small Chrome extension. It opens straight into "Ask the agent": a real
+      screenshot, a real web search, and reasoning through Chrome's on-device model —
+      a running conversation, not one-shot Q&A, and able to actually click or fill in
+      something on the page instead of just describing it. Switch tabs for the other
+      mode: ask what you're trying to do, and it finds the real element on the page
+      and spotlights it, getting sharper over time via a local backend that logs
+      confirmed matches. No signup, no deployment, runs entirely on your own machine.
     </p>
     <div class="cta-row">
       <a class="btn btn-primary" href="https://github.com/PowerLesha/hintora-poc" target="_blank" rel="noopener">View on GitHub</a>
@@ -243,24 +244,35 @@
 
   <section id="agent">
     <h2>Ask the agent</h2>
-    <p class="section-sub">A second panel tab for the other kind of question — one that needs outside knowledge, not a label already sitting on the page.</p>
+    <p class="section-sub">The panel's default tab — for the kind of question that needs outside knowledge, not a label already sitting on the page.</p>
     <div class="callout callout-agent">
       <p>Try <strong>"Does this repo have any known security vulnerabilities?"</strong> or
-      <strong>"How do I squash my last 3 commits?"</strong> in the panel's "Ask the agent" tab.
+      <strong>"How do I squash my last 3 commits?"</strong> — it's already the tab that's open.
       Three things happen for real when the browser supports them: a screenshot of the
       tab is actually captured, a real DuckDuckGo search runs (no API key), and the
       reasoning/answer step runs through <strong>Chrome's built-in on-device model</strong>
       (the Prompt API, Gemini Nano) if <code>chrome://flags</code> → "Prompt API for
-      Gemini Nano" is enabled — no network call, no cost, it runs on your machine. If the
-      flag's on but the model itself isn't downloaded yet, the extension triggers that
-      download itself and streams real progress into the trace, instead of quietly
-      falling back the first time.</p>
+      Gemini Nano" is enabled — no network call, no cost, it runs on your machine, with
+      its own custom "thinking" loader (the same viewfinder mark, spun around its own
+      center dot) while the model is actually generating. If the flag's on but the
+      model itself isn't downloaded yet, the extension triggers that download itself
+      and streams real progress into the trace, instead of quietly falling back the
+      first time.</p>
       <p>Each of those three degrades gracefully to a small scripted knowledge base in
       <code>lib/agent.ts</code> when it isn't available (offline, DuckDuckGo blocking
       the request, or the on-device model not enabled) — and the trace says which path
-      actually ran, rather than hiding it. When the answer maps back to something
-      clickable, a "Show me on the page" button spotlights it through the same overlay
-      the DOM-matcher mode uses.</p>
+      actually ran, rather than hiding it.</p>
+      <p>It's a conversation, not a form: each question's trace and answer stay on
+      screen as you ask the next one, and prior turns are fed back into the model so a
+      follow-up like "what about the second one?" actually resolves against what was
+      just said. And it isn't limited to describing what to click — the model gets the
+      same live, real accessible-name list the DOM matcher uses, and when a request is
+      best satisfied by interacting with something already on the page, the answer
+      shows a <strong>"Do it"</strong> button instead of "Show me on the page." Clicking
+      it is a real <code>el.click()</code> or a real value+input-event dispatch on the
+      live element, gated behind that explicit confirmation rather than firing on its
+      own — an on-device model quietly clicking a "Delete" button by itself isn't
+      something this demo does.</p>
       <p>It doesn't only wait to be asked, either: close the panel back down to just the
       floating bubble and, a few seconds later, it can nudge on its own — a small
       callout offering to check something, no typed question involved. Accepting it
@@ -273,7 +285,7 @@
     <table class="mapping">
       <tr><td>TypeScript, browser extensions, injected scripts, DOM understanding, overlays</td><td>the extension itself — <code>extension-src/</code></td></tr>
       <tr><td>Node, Next.js, Postgres/Supabase</td><td><code>backend/</code>, a Next.js API route with SQLite standing in for Postgres so trying this costs nothing and needs no account</td></tr>
-      <tr><td>AI agents/copilots, RAG</td><td><code>matcher.ts</code>'s DOM matching isn't a real LLM call, since the brief says that isn't needed — but its <code>(query, candidates) → ranked matches</code> interface is the seam, and the confirmed-resolutions table is the retrieval corpus a RAG version would query. <code>lib/agent.ts</code>'s "Ask the agent" mode goes further: real screenshot, real DuckDuckGo search, real reasoning via Chrome's on-device LLM when available, each with a scripted fallback when it isn't</td></tr>
+      <tr><td>AI agents/copilots, RAG</td><td><code>matcher.ts</code>'s DOM matching isn't a real LLM call, since the brief says that isn't needed — but its <code>(query, candidates) → ranked matches</code> interface is the seam, and the confirmed-resolutions table is the retrieval corpus a RAG version would query. <code>lib/agent.ts</code>'s "Ask the agent" mode goes further: real screenshot, real DuckDuckGo search, real multi-turn reasoning via Chrome's on-device LLM when available (each with a scripted fallback when it isn't), and it can act — clicking or filling in a real element it picked from the live page, not just describing one</td></tr>
     </table>
   </section>
 

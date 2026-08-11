@@ -19,12 +19,32 @@
 // stated in the trace text itself rather than hidden, so trying this on a
 // browser without the Prompt API enabled still shows an honest, working
 // demo instead of a silent downgrade.
-import { tokenize } from "./matcher";
+import { match, tokenize } from "./matcher";
+import { scan } from "./domScanner";
 import { askLocalLLM, getLocalLLMStatus, startLocalLLMDownload } from "./localLLM";
+import type { Candidate } from "../types";
 
 export interface AgentSource {
   title: string;
   url: string;
+}
+
+// One prior (question, answer) pair, fed back into the prompt so the model
+// can resolve "it"/"that" and follow-ups instead of treating every question
+// as the first one asked. content.ts owns the array across a conversation
+// and passes it back in on the next call — agent.ts itself is stateless.
+export interface ConversationTurn {
+  query: string;
+  answer: string;
+}
+
+// A real DOM action the model picked from the actual elements on the page,
+// not a description of one — content.ts executes exactly this (click, or
+// focus+set value) after the user confirms it via the answer card's button.
+export interface AgentAction {
+  kind: "click" | "type";
+  targetName: string; // accessible name of the resolved candidate, not the model's raw guess
+  value?: string; // text to type, for kind: "type"
 }
 
 export interface AgentStep {
@@ -33,6 +53,7 @@ export interface AgentStep {
   pending?: boolean;
   sources?: AgentSource[];
   targetName?: string; // accessible name of an on-page element worth spotlighting, if the answer has one
+  action?: AgentAction; // present instead of targetName when the answer resolved to something to actually do
 }
 
 interface RawSearchResult extends AgentSource {
@@ -135,6 +156,58 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Resolves the model's plain-text guess at an element ("the Download ZIP
+// button") against what's actually on the page right now, via the same
+// matcher.ts scoring the DOM-matcher mode uses — the model names a target
+// in prose, it doesn't get a handle to the real element, so this is the
+// step that turns "click the download button" into an actual Candidate.
+// Anything below matcher.ts's own confidence bar is treated as unresolved
+// rather than clicking whatever scored highest anyway.
+const ACTION_MATCH_THRESHOLD = 1;
+
+function resolveActionTarget(name: string, candidates: Candidate[]): Candidate | null {
+  const ranked = match(name, candidates);
+  const top = ranked[0];
+  return top && top.score >= ACTION_MATCH_THRESHOLD ? top : null;
+}
+
+// Parses the model's response for the ACTION protocol described in the
+// prompt built below. Returns null for a normal informational answer
+// (no ACTION line, or an ACTION line naming something that isn't actually
+// on the page — treated identically, since a hallucinated target is no
+// different from the model choosing not to act).
+function parseAction(
+  text: string,
+  candidates: Candidate[]
+): { action: AgentAction; explanation: string } | null {
+  const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+  const first = lines[0] || "";
+  const explanation = lines.slice(1).join(" ").trim();
+  const unquote = (s: string) => s.trim().replace(/^["']|["']$/g, "");
+
+  const clickMatch = first.match(/^ACTION:\s*CLICK\s+(.+)$/i);
+  if (clickMatch) {
+    const resolved = resolveActionTarget(unquote(clickMatch[1]), candidates);
+    if (!resolved) return null;
+    return {
+      action: { kind: "click", targetName: resolved.name },
+      explanation: explanation || `Clicking "${resolved.name}" for you.`,
+    };
+  }
+
+  const typeMatch = first.match(/^ACTION:\s*TYPE\s+(.+?)\s+INTO\s+(.+)$/i);
+  if (typeMatch) {
+    const resolved = resolveActionTarget(unquote(typeMatch[2]), candidates);
+    if (!resolved) return null;
+    return {
+      action: { kind: "type", targetName: resolved.name, value: unquote(typeMatch[1]) },
+      explanation: explanation || `Typing "${unquote(typeMatch[1])}" into "${resolved.name}" for you.`,
+    };
+  }
+
+  return null;
+}
+
 // Relayed through background.ts (see the comment there): a content script
 // can't fetch a cross-origin page itself when the host page's CSP doesn't
 // allow it, and DuckDuckGo's response has no CORS headers permitting a
@@ -149,7 +222,11 @@ function webSearch(query: string): Promise<RawSearchResult[]> {
   });
 }
 
-export async function* run(query: string, screenshotDataUrl: string | null): AsyncGenerator<AgentStep> {
+export async function* run(
+  query: string,
+  screenshotDataUrl: string | null,
+  history: ConversationTurn[] = []
+): AsyncGenerator<AgentStep> {
   const entry = pickEntry(query);
 
   await sleep(450);
@@ -207,23 +284,63 @@ export async function* run(query: string, screenshotDataUrl: string | null): Asy
   const llmAvailable = llmStatus === "available" || llmStatus === "readily";
   let reasoning: string;
   let answer: string;
+  let action: AgentAction | undefined;
 
   if (llmAvailable && (usingLive || entry)) {
     const grounding = usingLive
       ? liveResults.slice(0, 3).map((r, i) => `${i + 1}. ${r.title} — ${r.snippet}`).join("\n")
       : entry?.reasoning || "";
+    const historyBlock = history.length
+      ? history.map((h) => `Q: ${h.query}\nA: ${h.answer}`).join("\n\n")
+      : "";
+    // scan(document) is the same DOM-understanding step the "On this page"
+    // matcher mode uses — the model is only ever offered real, currently
+    // visible elements to act on, not asked to invent a selector.
+    const candidates = scan(document).filter((c) => c.name);
+    const candidateList = candidates
+      .slice(0, 40)
+      .map((c) => `- ${c.name} (${c.role})`)
+      .join("\n");
     const prompt = [
       `You are a browser assistant helping someone on ${location.hostname || "this site"}.`,
-      `Question: "${query}"`,
+      historyBlock ? `Conversation so far:\n${historyBlock}` : "",
+      `New question: "${query}"`,
       grounding ? `Relevant information:\n${grounding}` : "",
-      "Answer in 2-4 concise, actionable sentences. No preamble.",
+      candidateList
+        ? [
+            `Visible clickable/typeable elements on this page right now:`,
+            candidateList,
+            `If satisfying this request means clicking one of the elements above, reply with EXACTLY:`,
+            `ACTION: CLICK <exact element text from the list>`,
+            `then a one-sentence explanation on the next line.`,
+            `If it means typing into one of the elements above, reply with EXACTLY:`,
+            `ACTION: TYPE <text to type> INTO <exact element text from the list>`,
+            `then a one-sentence explanation on the next line.`,
+            `Otherwise — a plain question that isn't about interacting with this page — answer normally in 2-4 concise sentences with no ACTION line, taking the conversation above into account.`,
+          ].join("\n")
+        : "Answer in 2-4 concise, actionable sentences, taking the conversation above into account. No preamble.",
     ]
       .filter(Boolean)
       .join("\n\n");
+    // Pending, not a fixed delay: this yield lands right before the actual
+    // model call, so content.ts's loader stays up for exactly as long as
+    // askLocalLLM() genuinely takes (up to its own 20s timeout), then gets
+    // replaced in place by the real "reason" step below rather than added
+    // as a second row — the same same-phase-id update content.ts already
+    // does for the download-progress steps above.
+    yield { phase: "reason", text: "Thinking through the question and the page…", pending: true };
     const generated = await askLocalLLM(prompt);
     if (generated) {
-      answer = generated;
-      reasoning = "Chrome's on-device model (Gemini Nano) reasoned over the question and the information above.";
+      const parsed = parseAction(generated, candidates);
+      if (parsed) {
+        answer = parsed.explanation;
+        action = parsed.action;
+        reasoning =
+          "Chrome's on-device model decided this needs an action on the page rather than just an answer, and picked a specific element that's actually there right now.";
+      } else {
+        answer = generated;
+        reasoning = "Chrome's on-device model (Gemini Nano) reasoned over the question and the information above.";
+      }
     } else {
       reasoning = entry?.reasoning || FALLBACK.reasoning;
       answer = entry?.answer || FALLBACK.answer;
@@ -245,5 +362,5 @@ export async function* run(query: string, screenshotDataUrl: string | null): Asy
   yield { phase: "reason", text: reasoning };
 
   await sleep(350);
-  yield { phase: "answer", text: answer, targetName: entry?.targetName };
+  yield { phase: "answer", text: answer, targetName: action ? undefined : entry?.targetName, action };
 }

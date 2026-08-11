@@ -351,7 +351,8 @@
       if (model.availability) return await model.availability();
       if (model.capabilities) return (await model.capabilities()).available || "unavailable";
       return "available";
-    } catch {
+    } catch (e) {
+      console.warn("[Hintora] LanguageModel.availability() threw:", e);
       return "unavailable";
     }
   }
@@ -459,6 +460,37 @@
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+  var ACTION_MATCH_THRESHOLD = 1;
+  function resolveActionTarget(name, candidates) {
+    const ranked = match(name, candidates);
+    const top = ranked[0];
+    return top && top.score >= ACTION_MATCH_THRESHOLD ? top : null;
+  }
+  function parseAction(text, candidates) {
+    const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
+    const first = lines[0] || "";
+    const explanation = lines.slice(1).join(" ").trim();
+    const unquote = (s) => s.trim().replace(/^["']|["']$/g, "");
+    const clickMatch = first.match(/^ACTION:\s*CLICK\s+(.+)$/i);
+    if (clickMatch) {
+      const resolved = resolveActionTarget(unquote(clickMatch[1]), candidates);
+      if (!resolved) return null;
+      return {
+        action: { kind: "click", targetName: resolved.name },
+        explanation: explanation || `Clicking "${resolved.name}" for you.`
+      };
+    }
+    const typeMatch = first.match(/^ACTION:\s*TYPE\s+(.+?)\s+INTO\s+(.+)$/i);
+    if (typeMatch) {
+      const resolved = resolveActionTarget(unquote(typeMatch[2]), candidates);
+      if (!resolved) return null;
+      return {
+        action: { kind: "type", targetName: resolved.name, value: unquote(typeMatch[1]) },
+        explanation: explanation || `Typing "${unquote(typeMatch[1])}" into "${resolved.name}" for you.`
+      };
+    }
+    return null;
+  }
   function webSearch(query) {
     if (!query.trim()) return Promise.resolve([]);
     return new Promise((resolve) => {
@@ -467,7 +499,7 @@
       });
     });
   }
-  async function* run(query, screenshotDataUrl) {
+  async function* run(query, screenshotDataUrl, history = []) {
     const entry = pickEntry(query);
     await sleep(450);
     yield {
@@ -510,19 +542,44 @@
     const llmAvailable = llmStatus === "available" || llmStatus === "readily";
     let reasoning;
     let answer;
+    let action;
     if (llmAvailable && (usingLive || entry)) {
       const grounding = usingLive ? liveResults.slice(0, 3).map((r, i) => `${i + 1}. ${r.title} \u2014 ${r.snippet}`).join("\n") : entry?.reasoning || "";
+      const historyBlock = history.length ? history.map((h) => `Q: ${h.query}
+A: ${h.answer}`).join("\n\n") : "";
+      const candidates = scan(document).filter((c) => c.name);
+      const candidateList = candidates.slice(0, 40).map((c) => `- ${c.name} (${c.role})`).join("\n");
       const prompt = [
         `You are a browser assistant helping someone on ${location.hostname || "this site"}.`,
-        `Question: "${query}"`,
+        historyBlock ? `Conversation so far:
+${historyBlock}` : "",
+        `New question: "${query}"`,
         grounding ? `Relevant information:
 ${grounding}` : "",
-        "Answer in 2-4 concise, actionable sentences. No preamble."
+        candidateList ? [
+          `Visible clickable/typeable elements on this page right now:`,
+          candidateList,
+          `If satisfying this request means clicking one of the elements above, reply with EXACTLY:`,
+          `ACTION: CLICK <exact element text from the list>`,
+          `then a one-sentence explanation on the next line.`,
+          `If it means typing into one of the elements above, reply with EXACTLY:`,
+          `ACTION: TYPE <text to type> INTO <exact element text from the list>`,
+          `then a one-sentence explanation on the next line.`,
+          `Otherwise \u2014 a plain question that isn't about interacting with this page \u2014 answer normally in 2-4 concise sentences with no ACTION line, taking the conversation above into account.`
+        ].join("\n") : "Answer in 2-4 concise, actionable sentences, taking the conversation above into account. No preamble."
       ].filter(Boolean).join("\n\n");
+      yield { phase: "reason", text: "Thinking through the question and the page\u2026", pending: true };
       const generated = await askLocalLLM(prompt);
       if (generated) {
-        answer = generated;
-        reasoning = "Chrome's on-device model (Gemini Nano) reasoned over the question and the information above.";
+        const parsed = parseAction(generated, candidates);
+        if (parsed) {
+          answer = parsed.explanation;
+          action = parsed.action;
+          reasoning = "Chrome's on-device model decided this needs an action on the page rather than just an answer, and picked a specific element that's actually there right now.";
+        } else {
+          answer = generated;
+          reasoning = "Chrome's on-device model (Gemini Nano) reasoned over the question and the information above.";
+        }
       } else {
         reasoning = entry?.reasoning || FALLBACK.reasoning;
         answer = entry?.answer || FALLBACK.answer;
@@ -534,7 +591,7 @@ ${grounding}` : "",
     await sleep(350);
     yield { phase: "reason", text: reasoning };
     await sleep(350);
-    yield { phase: "answer", text: answer, targetName: entry?.targetName };
+    yield { phase: "answer", text: answer, targetName: action ? void 0 : entry?.targetName, action };
   }
 
   // content.ts
@@ -543,6 +600,7 @@ ${grounding}` : "",
   var CLOSE_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3l10 10M13 3L3 13"/></svg>`;
   var CHECK_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3.2L13 4.5"/></svg>`;
   var CROSS_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>`;
+  var THINKING_ICON = `<div class="hintora-thinking">${MARK_ICON}</div>`;
   var WORKFLOWS = [
     {
       id: "download-zip",
@@ -559,13 +617,13 @@ ${grounding}` : "",
   var feedbackEl;
   var sendBtn;
   var modeToggleEls;
-  var traceEl;
-  var answerEl;
+  var threadEl;
   var nudge;
   var nudgeTextEl;
   var nudgeCtaEl;
   var activeWorkflowCleanup = null;
-  var mode = "page";
+  var conversationHistory = [];
+  var mode = "agent";
   var nudgeTimer = null;
   var nudgeDismissed = false;
   var hasEngaged = false;
@@ -612,18 +670,17 @@ ${grounding}` : "",
     </div>
     <div class="hintora-panel-body">
       <div class="hintora-mode-toggle">
-        <button type="button" class="hintora-mode-btn hintora-mode-active" data-mode="page">On this page</button>
-        <button type="button" class="hintora-mode-btn" data-mode="agent">Ask the agent</button>
+        <button type="button" class="hintora-mode-btn hintora-mode-active" data-mode="agent">Ask the agent</button>
+        <button type="button" class="hintora-mode-btn" data-mode="page">On this page</button>
       </div>
       <div class="hintora-input-row">
-        <input type="text" placeholder="What are you trying to do?" />
+        <input type="text" placeholder="Ask a how-to question\u2026" />
         <button type="button" data-send>Ask</button>
       </div>
       <div class="hintora-chips"></div>
       <div class="hintora-status"></div>
       <div class="hintora-feedback hintora-hidden"></div>
-      <div class="hintora-trace hintora-hidden"></div>
-      <div class="hintora-answer hintora-hidden"></div>
+      <div class="hintora-thread"></div>
     </div>
   `;
     nudge = document.createElement("div");
@@ -643,11 +700,10 @@ ${grounding}` : "",
     feedbackEl = panel.querySelector(".hintora-feedback");
     sendBtn = panel.querySelector("[data-send]");
     modeToggleEls = Array.from(panel.querySelectorAll(".hintora-mode-btn"));
-    traceEl = panel.querySelector(".hintora-trace");
-    answerEl = panel.querySelector(".hintora-answer");
+    threadEl = panel.querySelector(".hintora-thread");
     nudgeTextEl = nudge.querySelector(".hintora-nudge-text");
     nudgeCtaEl = nudge.querySelector(".hintora-nudge-cta");
-    renderChips(examplesFor(location.hostname));
+    renderChips(agentExamplesFor(location.hostname));
     nudge.querySelector(".hintora-nudge-close").addEventListener("click", () => {
       nudgeDismissed = true;
       hideNudge();
@@ -687,10 +743,8 @@ ${grounding}` : "",
     cleanupWorkflow();
     overlay.hide();
     hideFeedback();
-    traceEl.classList.add("hintora-hidden");
-    traceEl.innerHTML = "";
-    answerEl.classList.add("hintora-hidden");
-    answerEl.innerHTML = "";
+    threadEl.innerHTML = "";
+    conversationHistory = [];
     setStatus("");
     input.value = "";
     input.placeholder = newMode === "page" ? "What are you trying to do?" : "Ask a how-to question\u2026";
@@ -862,13 +916,30 @@ ${grounding}` : "",
       chrome.runtime.sendMessage({ type: "HINTORA_CAPTURE_SCREENSHOT" }, (res) => resolve(res?.dataUrl || null));
     });
   }
-  function addTraceStep(id, text, pending, sources) {
+  function createTurn(query) {
+    const turn = document.createElement("div");
+    turn.className = "hintora-turn";
+    const question = document.createElement("div");
+    question.className = "hintora-turn-question";
+    question.textContent = query;
+    turn.appendChild(question);
+    const traceRoot = document.createElement("div");
+    traceRoot.className = "hintora-trace";
+    turn.appendChild(traceRoot);
+    const answerRoot = document.createElement("div");
+    answerRoot.className = "hintora-answer hintora-hidden";
+    turn.appendChild(answerRoot);
+    threadEl.appendChild(turn);
+    threadEl.scrollTop = threadEl.scrollHeight;
+    return { traceRoot, answerRoot };
+  }
+  function addTraceStep(traceRoot, id, text, pending, sources) {
     const row = document.createElement("div");
     row.className = "hintora-trace-step";
     row.dataset.stepId = id;
     const icon = document.createElement("div");
     icon.className = "hintora-trace-icon";
-    icon.innerHTML = pending ? `<div class="hintora-trace-spinner"></div>` : CHECK_ICON;
+    icon.innerHTML = pendingIcon(id, pending);
     const textWrap = document.createElement("div");
     const textEl = document.createElement("div");
     textEl.className = "hintora-trace-text";
@@ -886,35 +957,75 @@ ${grounding}` : "",
     }
     row.appendChild(icon);
     row.appendChild(textWrap);
-    traceEl.appendChild(row);
+    traceRoot.appendChild(row);
   }
-  function updateTraceStep(id, text, pending = false) {
-    const row = traceEl.querySelector(`[data-step-id="${id}"]`);
+  function pendingIcon(stepId, pending) {
+    if (!pending) return CHECK_ICON;
+    return stepId === "reason" ? THINKING_ICON : `<div class="hintora-trace-spinner"></div>`;
+  }
+  function updateTraceStep(traceRoot, id, text, pending = false) {
+    const row = traceRoot.querySelector(`[data-step-id="${id}"]`);
     if (!row) return;
-    row.querySelector(".hintora-trace-icon").innerHTML = pending ? `<div class="hintora-trace-spinner"></div>` : CHECK_ICON;
+    row.querySelector(".hintora-trace-icon").innerHTML = pendingIcon(id, pending);
     row.querySelector(".hintora-trace-text").textContent = text;
   }
   function formatAnswer(text) {
     return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   }
-  function renderAnswer(text, targetName, query) {
-    answerEl.classList.remove("hintora-hidden");
-    answerEl.innerHTML = "";
+  function performAction(action, statusEl) {
+    const candidates = scan(document);
+    const ranked = match(action.targetName, candidates);
+    const target = ranked[0];
+    if (!target || target.score <= 0) {
+      statusEl.textContent = "Couldn't find that element anymore \u2014 the page may have changed since this answer was generated.";
+      return;
+    }
+    overlay.show({ el: target.el, message: `Doing this for you: "${action.targetName}"` });
+    statusEl.textContent = action.kind === "click" ? `Clicking "${target.name}"\u2026` : `Typing "${action.value}" into "${target.name}"\u2026`;
+    setTimeout(() => {
+      if (action.kind === "click") {
+        target.el.click();
+      } else if (target.el instanceof HTMLInputElement || target.el instanceof HTMLTextAreaElement) {
+        target.el.focus();
+        target.el.value = action.value || "";
+        target.el.dispatchEvent(new Event("input", { bubbles: true }));
+        target.el.dispatchEvent(new Event("change", { bubbles: true }));
+      } else {
+        target.el.focus();
+      }
+      statusEl.textContent = action.kind === "click" ? `Done \u2014 clicked "${target.name}".` : `Done \u2014 typed into "${target.name}".`;
+    }, 350);
+  }
+  function renderAnswer(answerRoot, text, targetName, action, query) {
+    answerRoot.classList.remove("hintora-hidden");
+    answerRoot.innerHTML = "";
     const body = document.createElement("div");
     body.innerHTML = formatAnswer(text);
-    answerEl.appendChild(body);
+    answerRoot.appendChild(body);
     const caption = document.createElement("div");
     caption.className = "hintora-answer-caption";
-    caption.textContent = "Search + reasoning are mocked for this demo \u2014 see lib/agent.ts.";
-    answerEl.appendChild(caption);
-    if (targetName) {
+    caption.textContent = "See the trace above for exactly what ran for real vs. the scripted fallback \u2014 lib/agent.ts.";
+    answerRoot.appendChild(caption);
+    if (action) {
+      const actionStatus = document.createElement("div");
+      actionStatus.className = "hintora-answer-caption";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = action.kind === "click" ? `Do it \u2014 click "${action.targetName}"` : `Do it \u2014 fill in "${action.targetName}"`;
+      btn.addEventListener("click", () => {
+        btn.disabled = true;
+        performAction(action, actionStatus);
+      });
+      answerRoot.appendChild(btn);
+      answerRoot.appendChild(actionStatus);
+    } else if (targetName) {
       const found = scan(document).find((c) => c.name.toLowerCase().includes(targetName.toLowerCase()));
       if (found) {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.textContent = "Show me on the page";
         btn.addEventListener("click", () => showStep(found, query, "From the agent's answer"));
-        answerEl.appendChild(btn);
+        answerRoot.appendChild(btn);
       }
     }
   }
@@ -927,25 +1038,30 @@ ${grounding}` : "",
     cleanupWorkflow();
     hideFeedback();
     overlay.hide();
-    answerEl.classList.add("hintora-hidden");
-    answerEl.innerHTML = "";
-    traceEl.classList.remove("hintora-hidden");
-    traceEl.innerHTML = "";
     setStatus("");
-    addTraceStep("capture", "Capturing a screenshot of this tab\u2026", true);
+    input.value = "";
+    const { traceRoot, answerRoot } = createTurn(query);
+    addTraceStep(traceRoot, "capture", "Capturing a screenshot of this tab\u2026", true);
     const screenshot = await captureScreenshot();
     updateTraceStep(
+      traceRoot,
       "capture",
       screenshot ? "Captured a screenshot of this tab." : "Couldn't capture a screenshot on this page."
     );
-    for await (const step of run(query, screenshot)) {
-      if (traceEl.querySelector(`[data-step-id="${step.phase}"]`)) {
-        updateTraceStep(step.phase, step.text, step.pending ?? false);
+    let finalAnswer = "";
+    for await (const step of run(query, screenshot, conversationHistory)) {
+      if (traceRoot.querySelector(`[data-step-id="${step.phase}"]`)) {
+        updateTraceStep(traceRoot, step.phase, step.text, step.pending ?? false);
       } else {
-        addTraceStep(step.phase, step.text, step.pending ?? false, step.sources);
+        addTraceStep(traceRoot, step.phase, step.text, step.pending ?? false, step.sources);
       }
-      if (step.phase === "answer") renderAnswer(step.text, step.targetName, query);
+      if (step.phase === "answer") {
+        finalAnswer = step.text;
+        renderAnswer(answerRoot, step.text, step.targetName, step.action, query);
+      }
     }
+    conversationHistory.push({ query, answer: finalAnswer });
+    threadEl.scrollTop = threadEl.scrollHeight;
   }
   buildWidget();
   chrome.runtime.onMessage.addListener((msg) => {

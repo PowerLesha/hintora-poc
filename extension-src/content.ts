@@ -10,6 +10,7 @@ import { boostFor, examplesFor, agentExamplesFor, proactiveSuggestionFor } from 
 import type { ProactiveSuggestion } from "./lib/siteHints";
 import { overlay } from "./lib/overlay";
 import { run as runAgent } from "./lib/agent";
+import type { AgentAction, ConversationTurn } from "./lib/agent";
 import type { Candidate, DynamicHint, RankedCandidate } from "./types";
 
 const CONFIDENCE_THRESHOLD = 2; // below this, admit uncertainty instead of guessing
@@ -24,6 +25,12 @@ const MARK_ICON = `<svg class="hintora-mark-icon" viewBox="0 0 24 24" fill="none
 const CLOSE_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3l10 10M13 3L3 13"/></svg>`;
 const CHECK_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3.2L13 4.5"/></svg>`;
 const CROSS_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>`;
+// The "model is thinking" loader, shown only while lib/agent.ts's real
+// askLocalLLM() call is in flight (see the "reason" phase there) — the
+// same viewfinder-brackets mark as everywhere else in the widget, spun
+// around its own center dot like an actively focusing viewfinder, instead
+// of a generic spinner glyph.
+const THINKING_ICON = `<div class="hintora-thinking">${MARK_ICON}</div>`;
 
 interface Workflow {
   id: string;
@@ -54,17 +61,22 @@ let chipsEl: HTMLDivElement;
 let feedbackEl: HTMLDivElement;
 let sendBtn: HTMLButtonElement;
 let modeToggleEls: HTMLButtonElement[];
-let traceEl: HTMLDivElement;
-let answerEl: HTMLDivElement;
+let threadEl: HTMLDivElement;
 let nudge: HTMLDivElement;
 let nudgeTextEl: HTMLParagraphElement;
 let nudgeCtaEl: HTMLButtonElement;
 let activeWorkflowCleanup: (() => void) | null = null;
 
+// Turn history for the current agent-mode conversation, fed back into
+// lib/agent.ts's run() so follow-up questions ("what about the second one?")
+// have the prior Q&A to resolve against — reset whenever the thread itself
+// is cleared (mode switch, or the widget reopened fresh).
+let conversationHistory: ConversationTurn[] = [];
+
 // "On this page" (existing DOM matcher) vs "Ask the agent" (screenshot +
 // mocked web search/reasoning, see lib/agent.ts). Same input box, different
 // pipeline behind Ask/Enter.
-let mode: "page" | "agent" = "page";
+let mode: "page" | "agent" = "agent";
 
 // The literal "agent running in the background" piece: once the widget has
 // been switched on for this tab, it watches (no explicit question needed)
@@ -133,18 +145,17 @@ function buildWidget(): void {
     </div>
     <div class="hintora-panel-body">
       <div class="hintora-mode-toggle">
-        <button type="button" class="hintora-mode-btn hintora-mode-active" data-mode="page">On this page</button>
-        <button type="button" class="hintora-mode-btn" data-mode="agent">Ask the agent</button>
+        <button type="button" class="hintora-mode-btn hintora-mode-active" data-mode="agent">Ask the agent</button>
+        <button type="button" class="hintora-mode-btn" data-mode="page">On this page</button>
       </div>
       <div class="hintora-input-row">
-        <input type="text" placeholder="What are you trying to do?" />
+        <input type="text" placeholder="Ask a how-to question…" />
         <button type="button" data-send>Ask</button>
       </div>
       <div class="hintora-chips"></div>
       <div class="hintora-status"></div>
       <div class="hintora-feedback hintora-hidden"></div>
-      <div class="hintora-trace hintora-hidden"></div>
-      <div class="hintora-answer hintora-hidden"></div>
+      <div class="hintora-thread"></div>
     </div>
   `;
 
@@ -167,12 +178,11 @@ function buildWidget(): void {
   feedbackEl = panel.querySelector(".hintora-feedback")!;
   sendBtn = panel.querySelector("[data-send]")!;
   modeToggleEls = Array.from(panel.querySelectorAll(".hintora-mode-btn"));
-  traceEl = panel.querySelector(".hintora-trace")!;
-  answerEl = panel.querySelector(".hintora-answer")!;
+  threadEl = panel.querySelector(".hintora-thread")!;
   nudgeTextEl = nudge.querySelector(".hintora-nudge-text")!;
   nudgeCtaEl = nudge.querySelector(".hintora-nudge-cta")!;
 
-  renderChips(examplesFor(location.hostname));
+  renderChips(agentExamplesFor(location.hostname));
 
   nudge.querySelector(".hintora-nudge-close")!.addEventListener("click", () => {
     nudgeDismissed = true;
@@ -215,10 +225,8 @@ function setMode(newMode: "page" | "agent"): void {
   cleanupWorkflow();
   overlay.hide();
   hideFeedback();
-  traceEl.classList.add("hintora-hidden");
-  traceEl.innerHTML = "";
-  answerEl.classList.add("hintora-hidden");
-  answerEl.innerHTML = "";
+  threadEl.innerHTML = "";
+  conversationHistory = [];
   setStatus("");
   input.value = "";
   input.placeholder = newMode === "page" ? "What are you trying to do?" : "Ask a how-to question…";
@@ -422,14 +430,45 @@ function captureScreenshot(): Promise<string | null> {
   });
 }
 
-function addTraceStep(id: string, text: string, pending: boolean, sources?: { title: string; url: string }[]): void {
+// Each turn gets its own trace + answer container, appended to the
+// persistent thread rather than clearing/reusing one shared pair — that's
+// what turns this from a single-shot Q&A into a scrollable conversation.
+function createTurn(query: string): { traceRoot: HTMLDivElement; answerRoot: HTMLDivElement } {
+  const turn = document.createElement("div");
+  turn.className = "hintora-turn";
+
+  const question = document.createElement("div");
+  question.className = "hintora-turn-question";
+  question.textContent = query;
+  turn.appendChild(question);
+
+  const traceRoot = document.createElement("div");
+  traceRoot.className = "hintora-trace";
+  turn.appendChild(traceRoot);
+
+  const answerRoot = document.createElement("div");
+  answerRoot.className = "hintora-answer hintora-hidden";
+  turn.appendChild(answerRoot);
+
+  threadEl.appendChild(turn);
+  threadEl.scrollTop = threadEl.scrollHeight;
+  return { traceRoot, answerRoot };
+}
+
+function addTraceStep(
+  traceRoot: HTMLDivElement,
+  id: string,
+  text: string,
+  pending: boolean,
+  sources?: { title: string; url: string }[]
+): void {
   const row = document.createElement("div");
   row.className = "hintora-trace-step";
   row.dataset.stepId = id;
 
   const icon = document.createElement("div");
   icon.className = "hintora-trace-icon";
-  icon.innerHTML = pending ? `<div class="hintora-trace-spinner"></div>` : CHECK_ICON;
+  icon.innerHTML = pendingIcon(id, pending);
 
   const textWrap = document.createElement("div");
   const textEl = document.createElement("div");
@@ -450,13 +489,18 @@ function addTraceStep(id: string, text: string, pending: boolean, sources?: { ti
 
   row.appendChild(icon);
   row.appendChild(textWrap);
-  traceEl.appendChild(row);
+  traceRoot.appendChild(row);
 }
 
-function updateTraceStep(id: string, text: string, pending = false): void {
-  const row = traceEl.querySelector<HTMLDivElement>(`[data-step-id="${id}"]`);
+function pendingIcon(stepId: string, pending: boolean): string {
+  if (!pending) return CHECK_ICON;
+  return stepId === "reason" ? THINKING_ICON : `<div class="hintora-trace-spinner"></div>`;
+}
+
+function updateTraceStep(traceRoot: HTMLDivElement, id: string, text: string, pending = false): void {
+  const row = traceRoot.querySelector<HTMLDivElement>(`[data-step-id="${id}"]`);
   if (!row) return;
-  row.querySelector(".hintora-trace-icon")!.innerHTML = pending ? `<div class="hintora-trace-spinner"></div>` : CHECK_ICON;
+  row.querySelector(".hintora-trace-icon")!.innerHTML = pendingIcon(id, pending);
   row.querySelector(".hintora-trace-text")!.textContent = text;
 }
 
@@ -467,27 +511,73 @@ function formatAnswer(text: string): string {
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 }
 
-function renderAnswer(text: string, targetName: string | undefined, query: string): void {
-  answerEl.classList.remove("hintora-hidden");
-  answerEl.innerHTML = "";
+// Actually performs what the model decided on in agent.ts's ACTION parsing:
+// resolves the target's accessible name against the live DOM one more time
+// (the page may have moved on since the answer was generated) via the same
+// matcher.ts scoring the DOM-matcher mode uses, then clicks it or sets a
+// field's value for real — this is the "do it, not just show it" path.
+function performAction(action: AgentAction, statusEl: HTMLDivElement): void {
+  const candidates = scan(document);
+  const ranked = match(action.targetName, candidates);
+  const target = ranked[0];
+  if (!target || target.score <= 0) {
+    statusEl.textContent = "Couldn't find that element anymore — the page may have changed since this answer was generated.";
+    return;
+  }
+
+  overlay.show({ el: target.el, message: `Doing this for you: "${action.targetName}"` });
+  statusEl.textContent =
+    action.kind === "click" ? `Clicking "${target.name}"…` : `Typing "${action.value}" into "${target.name}"…`;
+
+  setTimeout(() => {
+    if (action.kind === "click") {
+      target.el.click();
+    } else if (target.el instanceof HTMLInputElement || target.el instanceof HTMLTextAreaElement) {
+      target.el.focus();
+      target.el.value = action.value || "";
+      target.el.dispatchEvent(new Event("input", { bubbles: true }));
+      target.el.dispatchEvent(new Event("change", { bubbles: true }));
+    } else {
+      target.el.focus();
+    }
+    statusEl.textContent = action.kind === "click" ? `Done — clicked "${target.name}".` : `Done — typed into "${target.name}".`;
+  }, 350); // lets overlay.show()'s scrollIntoView land before the real interaction fires
+}
+
+function renderAnswer(answerRoot: HTMLDivElement, text: string, targetName: string | undefined, action: AgentAction | undefined, query: string): void {
+  answerRoot.classList.remove("hintora-hidden");
+  answerRoot.innerHTML = "";
 
   const body = document.createElement("div");
   body.innerHTML = formatAnswer(text);
-  answerEl.appendChild(body);
+  answerRoot.appendChild(body);
 
   const caption = document.createElement("div");
   caption.className = "hintora-answer-caption";
-  caption.textContent = "Search + reasoning are mocked for this demo — see lib/agent.ts.";
-  answerEl.appendChild(caption);
+  caption.textContent = "See the trace above for exactly what ran for real vs. the scripted fallback — lib/agent.ts.";
+  answerRoot.appendChild(caption);
 
-  if (targetName) {
+  if (action) {
+    const actionStatus = document.createElement("div");
+    actionStatus.className = "hintora-answer-caption";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = action.kind === "click" ? `Do it — click "${action.targetName}"` : `Do it — fill in "${action.targetName}"`;
+    btn.addEventListener("click", () => {
+      btn.disabled = true;
+      performAction(action, actionStatus);
+    });
+    answerRoot.appendChild(btn);
+    answerRoot.appendChild(actionStatus);
+  } else if (targetName) {
     const found = scan(document).find((c) => c.name.toLowerCase().includes(targetName.toLowerCase()));
     if (found) {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.textContent = "Show me on the page";
       btn.addEventListener("click", () => showStep(found, query, "From the agent's answer"));
-      answerEl.appendChild(btn);
+      answerRoot.appendChild(btn);
     }
   }
 }
@@ -501,28 +591,34 @@ async function runAgentQuery(rawQuery: string): Promise<void> {
   cleanupWorkflow();
   hideFeedback();
   overlay.hide();
-
-  answerEl.classList.add("hintora-hidden");
-  answerEl.innerHTML = "";
-  traceEl.classList.remove("hintora-hidden");
-  traceEl.innerHTML = "";
   setStatus("");
+  input.value = "";
 
-  addTraceStep("capture", "Capturing a screenshot of this tab…", true);
+  const { traceRoot, answerRoot } = createTurn(query);
+
+  addTraceStep(traceRoot, "capture", "Capturing a screenshot of this tab…", true);
   const screenshot = await captureScreenshot();
   updateTraceStep(
+    traceRoot,
     "capture",
     screenshot ? "Captured a screenshot of this tab." : "Couldn't capture a screenshot on this page."
   );
 
-  for await (const step of runAgent(query, screenshot)) {
-    if (traceEl.querySelector(`[data-step-id="${step.phase}"]`)) {
-      updateTraceStep(step.phase, step.text, step.pending ?? false);
+  let finalAnswer = "";
+  for await (const step of runAgent(query, screenshot, conversationHistory)) {
+    if (traceRoot.querySelector(`[data-step-id="${step.phase}"]`)) {
+      updateTraceStep(traceRoot, step.phase, step.text, step.pending ?? false);
     } else {
-      addTraceStep(step.phase, step.text, step.pending ?? false, step.sources);
+      addTraceStep(traceRoot, step.phase, step.text, step.pending ?? false, step.sources);
     }
-    if (step.phase === "answer") renderAnswer(step.text, step.targetName, query);
+    if (step.phase === "answer") {
+      finalAnswer = step.text;
+      renderAnswer(answerRoot, step.text, step.targetName, step.action, query);
+    }
   }
+
+  conversationHistory.push({ query, answer: finalAnswer });
+  threadEl.scrollTop = threadEl.scrollHeight;
 }
 
 buildWidget();

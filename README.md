@@ -28,7 +28,24 @@ extension still works the same, just without the part described in
 
 **3. Demo.** Go to any public GitHub repo, e.g. `https://github.com/facebook/react`.
 Click the purple **H** icon in the toolbar; a small "Ask Hintora" panel
-opens bottom-right. Try a chip, or type your own:
+opens bottom-right, already on its **Ask the agent** tab — the mode for a
+question that needs outside knowledge, not just a page element. Try "Does
+this repo have any known security vulnerabilities?" or "How do I squash my
+last 3 commits?" and watch the trace: a real screenshot capture, a real
+DuckDuckGo search, then reasoning/answer steps arriving one at a time.
+Reasoning runs through a real on-device model if `chrome://flags` →
+"Prompt API for Gemini Nano" is enabled and its model downloaded on this
+machine; otherwise it falls back to a scripted answer, and the trace says
+so either way. Ask a follow-up in the same panel — it's a running
+conversation, not reset per question — and if a request is better
+satisfied by clicking or filling in something already on the page, the
+answer offers a "Do it" button instead of just describing it. See
+[Ask the agent](#ask-the-agent-libagentts-the-default-mode) for exactly
+what's real vs. scripted and why.
+
+Switch to the **On this page** tab for the other kind of question — one
+answered by a specific element already visible on the page, not outside
+knowledge. Try a chip, or type your own:
 
 - "How do I download this project's code?" highlights the green **Code**
   button, then, once you actually click it, highlights **Download ZIP**
@@ -40,18 +57,6 @@ opens bottom-right. Try a chip, or type your own:
   admit low confidence and offer alternatives instead of guessing wrong.
   Click one and it's logged as a correction.
 - After any match, hit 👍. Refresh `localhost:3000` and it's there.
-
-Switch to the **Ask the agent** tab at the top of the panel for the other
-kind of question — one that needs outside knowledge, not just a page
-element. Try "Does this repo have any known security vulnerabilities?" or
-"How do I squash my last 3 commits?" and watch the trace: a real
-screenshot capture, a real DuckDuckGo search, then reasoning/answer steps
-arriving one at a time. Reasoning runs through a real on-device model if
-`chrome://flags` → "Prompt API for Gemini Nano" is enabled and its model
-downloaded on this machine; otherwise it falls back to a scripted answer,
-and the trace says so either way. See
-[Ask the agent](#ask-the-agent-libagentts-a-second-mode) for exactly
-what's real vs. scripted and why.
 
 It isn't GitHub-specific. The matcher runs against the accessible name of
 every interactive element on whatever page is open; GitHub is just the demo
@@ -71,7 +76,7 @@ extension-src/         TypeScript source, the actual thing to read or edit
   background.ts           toolbar click relay + backend fetch relay + screenshot capture (see below)
   lib/domScanner.ts        page understanding: interactive elements -> accessible names
   lib/matcher.ts           intent understanding: query -> ranked element matches
-  lib/agent.ts             "Ask the agent" mode: screenshot + real web search + real/mocked reasoning -> answer
+  lib/agent.ts             "Ask the agent" mode: multi-turn, screenshot + real web search + real/mocked reasoning, can act on the page
   lib/localLLM.ts          Chrome's on-device model (Prompt API), with a silent unavailable fallback
   lib/siteHints.ts         static per-site score boosts, example prompts, proactive nudge rules
   lib/overlay.ts           spotlight/callout rendering, tracks and self-heals
@@ -139,13 +144,16 @@ substring check plus a per-site hint saves it. A real matcher would use
 embeddings so it doesn't need a growing patch list for every
 plural/synonym/homonym gap like this one.
 
-## Ask the agent (`lib/agent.ts`), a second mode
+## Ask the agent (`lib/agent.ts`), the default mode
 
-The panel has a second tab next to "On this page": **Ask the agent**. It's
-for the class of question the DOM matcher above can't answer at all —
-"Does this repo have any known security vulnerabilities?", "How do I
-squash my last 3 commits?" — questions that need outside knowledge or a
-web search, not just a label already sitting on the page.
+The panel opens straight into this tab, next to "On this page" — it's for
+the class of question the DOM matcher above can't answer at all — "Does
+this repo have any known security vulnerabilities?", "How do I squash my
+last 3 commits?" — questions that need outside knowledge or a web search,
+not just a label already sitting on the page. It's the default because
+it's the more capable of the two modes: real search, real on-device
+reasoning, a running conversation, and the ability to act instead of just
+point.
 
 Three things in this mode are real, not simulated, when the browser
 supports them:
@@ -191,6 +199,30 @@ When an answer maps back to something clickable, it also shows a "Show me
 on the page" button that spotlights that element via the same `overlay`
 the DOM-matcher mode uses — the two modes end at the same guidance
 primitive, they just start from different kinds of question.
+
+**It's a conversation, not a one-shot form.** `content.ts` keeps a
+`ConversationTurn[]` for the tab's session and appends each turn to the
+panel instead of clearing it, so earlier Q&A stay visible; that same array
+is fed back into `run(query, screenshot, history)`, and folded into the
+on-device model's prompt, so a follow-up like "what about the second one?"
+has the prior answer to resolve against instead of being answered cold.
+Switching mode tabs resets the thread — it's a fresh conversation, not a
+mixed one.
+
+**It can act, not just point.** Alongside the plain-answer path, the
+prompt also hands the model the live, real accessible-name list from
+`domScanner.scan(document)` — the exact same list the DOM matcher mode
+scores against — and asks it to reply with a small `ACTION: CLICK <name>`
+/ `ACTION: TYPE <text> INTO <name>` protocol when the request is best
+satisfied by interacting with something already on the page, instead of
+just describing it. `lib/agent.ts` re-resolves that name through
+`matcher.ts` (a hallucinated or stale target simply fails to resolve and
+falls back to a normal answer), and the answer card renders a "Do it"
+button rather than "Show me on the page" — clicking it is a real
+`el.click()` or a real `value` + `input`/`change` event dispatch on the
+live DOM, gated behind that explicit confirmation click rather than firing
+unprompted, since an on-device model picking, say, a "Delete" button on
+its own isn't something this demo does silently.
 
 **The unprompted part.** Once the widget is switched on for a tab, it
 doesn't just wait to be asked. Close the panel back down to just the
