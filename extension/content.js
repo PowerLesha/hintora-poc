@@ -511,7 +511,7 @@
   function parseAction(text, candidates) {
     const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
     const first = lines[0] || "";
-    const explanation = lines.slice(1).join(" ").trim();
+    const explanation = lines.slice(1).filter((l) => !/^ACTION:/i.test(l)).join(" ").trim();
     const unquote = (s) => s.trim().replace(/^["']|["']$/g, "");
     const clickMatch = first.match(/^ACTION:\s*CLICK\s+(.+)$/i);
     if (clickMatch) {
@@ -591,7 +591,8 @@
 A: ${h.answer}`).join("\n\n") : "";
       const actionRequested = looksLikeActionRequest(query);
       const candidates = actionRequested ? scan(document).filter((c) => c.name) : [];
-      const candidateList = candidates.slice(0, 40).map((c) => `- ${c.name} (${c.role})`).join("\n");
+      const rankedCandidates = match(query, candidates).filter((c) => c.score > 0);
+      const candidateList = rankedCandidates.slice(0, 15).map((c) => `- ${c.name} (${c.role})`).join("\n");
       const pageTitle = document.title.replace(/\s+/g, " ").trim().slice(0, 80);
       const prompt = [
         `You are a browser assistant helping someone on ${location.hostname || "this site"}.`,

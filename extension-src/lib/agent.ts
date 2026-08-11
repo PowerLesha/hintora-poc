@@ -201,7 +201,15 @@ function parseAction(
 ): { action: AgentAction; explanation: string } | null {
   const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
   const first = lines[0] || "";
-  const explanation = lines.slice(1).join(" ").trim();
+  // The model sometimes emits more than one ACTION line instead of one
+  // ACTION line + a plain explanation — only the first is ever treated as
+  // the real decision, but a stray second one shouldn't leak raw protocol
+  // syntax into what's shown as the human-readable explanation.
+  const explanation = lines
+    .slice(1)
+    .filter((l) => !/^ACTION:/i.test(l))
+    .join(" ")
+    .trim();
   const unquote = (s: string) => s.trim().replace(/^["']|["']$/g, "");
 
   const clickMatch = first.match(/^ACTION:\s*CLICK\s+(.+)$/i);
@@ -323,8 +331,16 @@ export async function* run(
     // Only gathered for queries that read as a command in the first place.
     const actionRequested = looksLikeActionRequest(query);
     const candidates = actionRequested ? scan(document).filter((c) => c.name) : [];
-    const candidateList = candidates
-      .slice(0, 40)
+    // Pre-ranked by the same matcher.ts scoring the DOM-matcher mode uses,
+    // not left in raw DOM order: a small on-device model handed 40 candidates
+    // in whatever order they happened to appear in the DOM tends to latch
+    // onto whichever is textually prominent (Watch's accessible name is a
+    // full sentence) rather than the one the query actually calls for.
+    // Ranking first and keeping only real contenders fixes that instead of
+    // hoping the model sorts it out on its own.
+    const rankedCandidates = match(query, candidates).filter((c) => c.score > 0);
+    const candidateList = rankedCandidates
+      .slice(0, 15)
       .map((c) => `- ${c.name} (${c.role})`)
       .join("\n");
     const pageTitle = document.title.replace(/\s+/g, " ").trim().slice(0, 80);
