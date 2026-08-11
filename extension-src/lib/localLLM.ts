@@ -113,10 +113,23 @@ export function startLocalLLMDownload(): { progress: () => number; done: Promise
 }
 
 export async function askLocalLLM(prompt: string): Promise<string | null> {
+  const model = getModel();
+  if (!model) return null;
+
+  // Racing model.create() against a timeout, on its own, leaks a session
+  // if create() is just slow rather than actually stuck: withTimeout()
+  // rejects and this function moves on, but the real create() call is
+  // still running underneath and will eventually hand back a live session
+  // nobody holds a reference to anymore, so nothing ever destroys it. A
+  // held-open session, repeated across enough timed-out calls, is a
+  // plausible explanation for the model going quietly "unavailable" later
+  // for no visible reason. So: always destroy whatever create() resolves
+  // to, even after giving up on waiting for it.
+  const createPromise = model.create();
+  createPromise.catch(() => {});
+
   try {
-    const model = getModel();
-    if (!model) return null;
-    const session = await withTimeout(model.create(), 8000);
+    const session = await withTimeout(createPromise, 15000);
     try {
       const text = await withTimeout(session.prompt(prompt), 20000);
       return text?.trim() || null;
@@ -124,6 +137,7 @@ export async function askLocalLLM(prompt: string): Promise<string | null> {
       session.destroy?.();
     }
   } catch {
+    createPromise.then((session) => session.destroy?.()).catch(() => {});
     return null;
   }
 }

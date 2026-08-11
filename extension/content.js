@@ -373,10 +373,13 @@
     return { progress: () => loaded, done };
   }
   async function askLocalLLM(prompt) {
+    const model = getModel();
+    if (!model) return null;
+    const createPromise = model.create();
+    createPromise.catch(() => {
+    });
     try {
-      const model = getModel();
-      if (!model) return null;
-      const session = await withTimeout(model.create(), 8e3);
+      const session = await withTimeout(createPromise, 15e3);
       try {
         const text = await withTimeout(session.prompt(prompt), 2e4);
         return text?.trim() || null;
@@ -384,6 +387,8 @@
         session.destroy?.();
       }
     } catch {
+      createPromise.then((session) => session.destroy?.()).catch(() => {
+      });
       return null;
     }
   }
