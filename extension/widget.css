@@ -446,11 +446,8 @@
   animation: hintora-spin 0.7s linear infinite;
 }
 
-/* "Model is thinking" loader (agent.ts's "reason" phase only): the same
-   viewfinder-brackets mark as the bubble/overlay, spinning around its own
-   center dot with a soft glow that breathes in and out, instead of a
-   generic spinner — the brand's own "actively focusing" motif, reused
-   rather than invented from scratch. */
+/* "Model is thinking" loader: the same viewfinder-brackets mark as the
+   bubble/overlay, spinning around its own center dot with a soft glow. */
 .hintora-thinking {
   width: 16px;
   height: 16px;

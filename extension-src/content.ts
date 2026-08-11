@@ -25,11 +25,9 @@ const MARK_ICON = `<svg class="hintora-mark-icon" viewBox="0 0 24 24" fill="none
 const CLOSE_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 3l10 10M13 3L3 13"/></svg>`;
 const CHECK_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3.2 3.2L13 4.5"/></svg>`;
 const CROSS_ICON = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.5 3.5l9 9M12.5 3.5l-9 9"/></svg>`;
-// The "model is thinking" loader, shown only while lib/agent.ts's real
-// askLocalLLM() call is in flight (see the "reason" phase there) — the
-// same viewfinder-brackets mark as everywhere else in the widget, spun
-// around its own center dot like an actively focusing viewfinder, instead
-// of a generic spinner glyph.
+// "Model is thinking" loader, shown while lib/agent.ts's askLocalLLM()
+// call is in flight — the same viewfinder mark, spun around its own
+// center dot, instead of a generic spinner glyph.
 const THINKING_ICON = `<div class="hintora-thinking">${MARK_ICON}</div>`;
 
 interface Workflow {
@@ -68,14 +66,12 @@ let nudgeCtaEl: HTMLButtonElement;
 let activeWorkflowCleanup: (() => void) | null = null;
 
 // Turn history for the current agent-mode conversation, fed back into
-// lib/agent.ts's run() so follow-up questions ("what about the second one?")
-// have the prior Q&A to resolve against — reset whenever the thread itself
-// is cleared (mode switch, or the widget reopened fresh).
+// lib/agent.ts's run() so follow-ups resolve against prior Q&A. Reset
+// whenever the thread itself is cleared (mode switch).
 let conversationHistory: ConversationTurn[] = [];
 
-// "On this page" (existing DOM matcher) vs "Ask the agent" (screenshot +
-// mocked web search/reasoning, see lib/agent.ts). Same input box, different
-// pipeline behind Ask/Enter.
+// "On this page" (DOM matcher) vs "Ask the agent" (screenshot + web search
+// + reasoning, see lib/agent.ts). Same input box, different pipeline.
 let mode: "page" | "agent" = "agent";
 
 // The literal "agent running in the background" piece: once the widget has
@@ -431,8 +427,7 @@ function captureScreenshot(): Promise<string | null> {
 }
 
 // Each turn gets its own trace + answer container, appended to the
-// persistent thread rather than clearing/reusing one shared pair — that's
-// what turns this from a single-shot Q&A into a scrollable conversation.
+// persistent thread rather than clearing/reusing one shared pair.
 function createTurn(query: string): { traceRoot: HTMLDivElement; answerRoot: HTMLDivElement } {
   const turn = document.createElement("div");
   turn.className = "hintora-turn";
@@ -511,14 +506,11 @@ function formatAnswer(text: string): string {
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 }
 
-// Actually performs what the model decided on in agent.ts's ACTION parsing.
-// Uses the exact live element agent.ts already resolved (action.el), not a
-// second fuzzy-name lookup against a fresh scan — re-matching by name a
-// second time, independently, is exactly what once clicked a hamburger
-// menu instead of the "Issues" tab the model actually meant, because the
-// two lookups can land on different elements once anything about the page
-// (viewport width, a re-render) has shifted between generating the answer
-// and the user pressing "Do it".
+// Performs what agent.ts's ACTION parsing decided on, using the exact live
+// element it already resolved (action.el) rather than a second fuzzy-name
+// lookup against a fresh scan — two independent lookups can land on
+// different elements once anything about the page has shifted between
+// generating the answer and the user pressing "Do it".
 function performAction(action: AgentAction, statusEl: HTMLDivElement): void {
   if (!document.documentElement.contains(action.el)) {
     statusEl.textContent = "That element disappeared from the page — the answer above may be stale, try asking again.";

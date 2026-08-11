@@ -38,15 +38,11 @@ export interface ConversationTurn {
   answer: string;
 }
 
-// A real DOM action the model picked from the actual elements on the page,
-// not a description of one — content.ts executes exactly this (click, or
-// focus+set value) after the user confirms it via the answer card's button.
-// Carries the live element itself, resolved once here, rather than a name
-// content.ts would have to re-resolve by fuzzy match a second time at
-// click time — the same "keep a live reference, don't re-derive it" choice
-// overlay.ts makes for the spotlight, for the same reason: a second,
-// independent fuzzy match against a possibly-changed page can land on a
-// different element than the one actually reasoned about.
+// A real DOM action the model picked from the actual elements on the page.
+// Carries the live element itself (resolved once, here) rather than a name
+// content.ts would have to re-resolve by fuzzy match a second time at click
+// time — same "keep a live reference, don't re-derive it" choice overlay.ts
+// makes for the spotlight.
 export interface AgentAction {
   kind: "click" | "type";
   targetName: string; // accessible name, for the button label and the status text
@@ -163,15 +159,9 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// A small on-device model handed both an ACTION protocol and a list of
-// clickable elements in the same prompt turns out to reach for ACTION far
-// too eagerly — it picked "click Watch" for the purely informational
-// "What does this project do?" once, apparently just because Watch was in
-// the list. Gating the whole ACTION branch (list, instructions, and
-// parsing the response for it) on the query itself looking imperative
-// removes the temptation for anything phrased as a question rather than a
-// command, the same "don't offer what isn't relevant" instinct matcher.ts
-// applies to candidate scoring.
+// Gates the ACTION protocol (list of elements + instructions) on the query
+// itself reading as a command — a small on-device model handed a candidate
+// list reaches for ACTION too eagerly otherwise, even on plain questions.
 const ACTION_VERBS = new Set([
   "click", "open", "press", "tap", "select", "choose", "download", "expand",
   "collapse", "toggle", "check", "uncheck", "fill", "type", "enter", "submit",
@@ -184,13 +174,9 @@ function looksLikeActionRequest(query: string): boolean {
   return tokenize(query).some((t) => ACTION_VERBS.has(t));
 }
 
-// Resolves the model's plain-text guess at an element ("the Download ZIP
-// button") against what's actually on the page right now, via the same
-// matcher.ts scoring the DOM-matcher mode uses — the model names a target
-// in prose, it doesn't get a handle to the real element, so this is the
-// step that turns "click the download button" into an actual Candidate.
-// Anything below matcher.ts's own confidence bar is treated as unresolved
-// rather than clicking whatever scored highest anyway.
+// Resolves the model's plain-text guess at an element against what's
+// actually on the page, via the same matcher.ts scoring the DOM-matcher
+// mode uses. Below its confidence bar counts as unresolved.
 const ACTION_MATCH_THRESHOLD = 1;
 
 function resolveActionTarget(name: string, candidates: Candidate[]): Candidate | null {
@@ -265,12 +251,8 @@ export async function* run(
       : "Couldn't capture a screenshot on this page (blocked page, or the toolbar icon hasn't been clicked yet this tab) — reasoning on the question alone.",
   };
 
-  // A question like "what does this project do?" is meaningless to a web
-  // search on its own — "this" only means something on the actual page.
-  // The scripted entries below sidestep that by hardcoding a real query;
-  // for anything else, folding in the page's own title is the cheapest
-  // way to ground a deictic question in what page it was actually asked
-  // on (GitHub's title is literally "owner/repo: description").
+  // "What does this project do?" means nothing to a web search on its own —
+  // folding in the page title grounds it in whatever page it was asked on.
   const pageTitle = document.title.replace(/\s+/g, " ").trim().slice(0, 80);
   const searchQuery = entry?.searchQuery || (pageTitle ? `${pageTitle} — ${query}` : query);
   const liveResults = await webSearch(searchQuery);
@@ -328,11 +310,8 @@ export async function* run(
     const historyBlock = history.length
       ? history.map((h) => `Q: ${h.query}\nA: ${h.answer}`).join("\n\n")
       : "";
-    // scan(document) is the same DOM-understanding step the "On this page"
-    // matcher mode uses — the model is only ever offered real, currently
-    // visible elements to act on, not asked to invent a selector. Only
-    // gathered at all for queries that look like a command in the first
-    // place (see looksLikeActionRequest above).
+    // scan(document): same DOM-understanding step "On this page" mode uses.
+    // Only gathered for queries that read as a command in the first place.
     const actionRequested = looksLikeActionRequest(query);
     const candidates = actionRequested ? scan(document).filter((c) => c.name) : [];
     const candidateList = candidates
@@ -360,12 +339,8 @@ export async function* run(
     ]
       .filter(Boolean)
       .join("\n\n");
-    // Pending, not a fixed delay: this yield lands right before the actual
-    // model call, so content.ts's loader stays up for exactly as long as
-    // askLocalLLM() genuinely takes (up to its own 20s timeout), then gets
-    // replaced in place by the real "reason" step below rather than added
-    // as a second row — the same same-phase-id update content.ts already
-    // does for the download-progress steps above.
+    // Pending, right before the real call, so content.ts's loader stays up
+    // for exactly as long as askLocalLLM() takes, not a fixed delay.
     yield { phase: "reason", text: "Thinking through the question and the page…", pending: true };
     const generated = await askLocalLLM(prompt);
     if (generated) {
