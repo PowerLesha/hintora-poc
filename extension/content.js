@@ -460,6 +460,43 @@
   function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
+  var ACTION_VERBS = /* @__PURE__ */ new Set([
+    "click",
+    "open",
+    "press",
+    "tap",
+    "select",
+    "choose",
+    "download",
+    "expand",
+    "collapse",
+    "toggle",
+    "check",
+    "uncheck",
+    "fill",
+    "type",
+    "enter",
+    "submit",
+    "navigate",
+    "switch",
+    "subscribe",
+    "unsubscribe",
+    "follow",
+    "unfollow",
+    "star",
+    "unstar",
+    "watch",
+    "unwatch",
+    "close",
+    "dismiss",
+    "delete",
+    "remove",
+    "enable",
+    "disable"
+  ]);
+  function looksLikeActionRequest(query) {
+    return tokenize(query).some((t) => ACTION_VERBS.has(t));
+  }
   var ACTION_MATCH_THRESHOLD = 1;
   function resolveActionTarget(name, candidates) {
     const ranked = match(name, candidates);
@@ -476,7 +513,7 @@
       const resolved = resolveActionTarget(unquote(clickMatch[1]), candidates);
       if (!resolved) return null;
       return {
-        action: { kind: "click", targetName: resolved.name },
+        action: { kind: "click", targetName: resolved.name, el: resolved.el },
         explanation: explanation || `Clicking "${resolved.name}" for you.`
       };
     }
@@ -485,7 +522,7 @@
       const resolved = resolveActionTarget(unquote(typeMatch[2]), candidates);
       if (!resolved) return null;
       return {
-        action: { kind: "type", targetName: resolved.name, value: unquote(typeMatch[1]) },
+        action: { kind: "type", targetName: resolved.name, el: resolved.el, value: unquote(typeMatch[1]) },
         explanation: explanation || `Typing "${unquote(typeMatch[1])}" into "${resolved.name}" for you.`
       };
     }
@@ -506,7 +543,8 @@
       phase: "vision",
       text: screenshotDataUrl ? entry?.visionNote || "Screenshot captured \u2014 reasoning on the question and whatever's on the page." : "Couldn't capture a screenshot on this page (blocked page, or the toolbar icon hasn't been clicked yet this tab) \u2014 reasoning on the question alone."
     };
-    const searchQuery = entry?.searchQuery || query;
+    const pageTitle = document.title.replace(/\s+/g, " ").trim().slice(0, 80);
+    const searchQuery = entry?.searchQuery || (pageTitle ? `${pageTitle} \u2014 ${query}` : query);
     const liveResults = await webSearch(searchQuery);
     const usingLive = liveResults.length > 0;
     const sources = usingLive ? liveResults.slice(0, 3).map((r) => ({ title: r.title, url: r.url })) : entry?.sources || [];
@@ -547,7 +585,8 @@
       const grounding = usingLive ? liveResults.slice(0, 3).map((r, i) => `${i + 1}. ${r.title} \u2014 ${r.snippet}`).join("\n") : entry?.reasoning || "";
       const historyBlock = history.length ? history.map((h) => `Q: ${h.query}
 A: ${h.answer}`).join("\n\n") : "";
-      const candidates = scan(document).filter((c) => c.name);
+      const actionRequested = looksLikeActionRequest(query);
+      const candidates = actionRequested ? scan(document).filter((c) => c.name) : [];
       const candidateList = candidates.slice(0, 40).map((c) => `- ${c.name} (${c.role})`).join("\n");
       const prompt = [
         `You are a browser assistant helping someone on ${location.hostname || "this site"}.`,
@@ -571,7 +610,7 @@ ${grounding}` : "",
       yield { phase: "reason", text: "Thinking through the question and the page\u2026", pending: true };
       const generated = await askLocalLLM(prompt);
       if (generated) {
-        const parsed = parseAction(generated, candidates);
+        const parsed = actionRequested ? parseAction(generated, candidates) : null;
         if (parsed) {
           answer = parsed.explanation;
           action = parsed.action;
@@ -973,27 +1012,24 @@ ${grounding}` : "",
     return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   }
   function performAction(action, statusEl) {
-    const candidates = scan(document);
-    const ranked = match(action.targetName, candidates);
-    const target = ranked[0];
-    if (!target || target.score <= 0) {
-      statusEl.textContent = "Couldn't find that element anymore \u2014 the page may have changed since this answer was generated.";
+    if (!document.documentElement.contains(action.el)) {
+      statusEl.textContent = "That element disappeared from the page \u2014 the answer above may be stale, try asking again.";
       return;
     }
-    overlay.show({ el: target.el, message: `Doing this for you: "${action.targetName}"` });
-    statusEl.textContent = action.kind === "click" ? `Clicking "${target.name}"\u2026` : `Typing "${action.value}" into "${target.name}"\u2026`;
+    overlay.show({ el: action.el, message: `Doing this for you: "${action.targetName}"` });
+    statusEl.textContent = action.kind === "click" ? `Clicking "${action.targetName}"\u2026` : `Typing "${action.value}" into "${action.targetName}"\u2026`;
     setTimeout(() => {
       if (action.kind === "click") {
-        target.el.click();
-      } else if (target.el instanceof HTMLInputElement || target.el instanceof HTMLTextAreaElement) {
-        target.el.focus();
-        target.el.value = action.value || "";
-        target.el.dispatchEvent(new Event("input", { bubbles: true }));
-        target.el.dispatchEvent(new Event("change", { bubbles: true }));
+        action.el.click();
+      } else if (action.el instanceof HTMLInputElement || action.el instanceof HTMLTextAreaElement) {
+        action.el.focus();
+        action.el.value = action.value || "";
+        action.el.dispatchEvent(new Event("input", { bubbles: true }));
+        action.el.dispatchEvent(new Event("change", { bubbles: true }));
       } else {
-        target.el.focus();
+        action.el.focus();
       }
-      statusEl.textContent = action.kind === "click" ? `Done \u2014 clicked "${target.name}".` : `Done \u2014 typed into "${target.name}".`;
+      statusEl.textContent = action.kind === "click" ? `Done \u2014 clicked "${action.targetName}".` : `Done \u2014 typed into "${action.targetName}".`;
     }, 350);
   }
   function renderAnswer(answerRoot, text, targetName, action, query) {
@@ -1050,10 +1086,12 @@ ${grounding}` : "",
     );
     let finalAnswer = "";
     for await (const step of run(query, screenshot, conversationHistory)) {
-      if (traceRoot.querySelector(`[data-step-id="${step.phase}"]`)) {
-        updateTraceStep(traceRoot, step.phase, step.text, step.pending ?? false);
-      } else {
-        addTraceStep(traceRoot, step.phase, step.text, step.pending ?? false, step.sources);
+      if (step.phase !== "answer") {
+        if (traceRoot.querySelector(`[data-step-id="${step.phase}"]`)) {
+          updateTraceStep(traceRoot, step.phase, step.text, step.pending ?? false);
+        } else {
+          addTraceStep(traceRoot, step.phase, step.text, step.pending ?? false, step.sources);
+        }
       }
       if (step.phase === "answer") {
         finalAnswer = step.text;

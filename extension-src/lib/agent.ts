@@ -41,9 +41,16 @@ export interface ConversationTurn {
 // A real DOM action the model picked from the actual elements on the page,
 // not a description of one — content.ts executes exactly this (click, or
 // focus+set value) after the user confirms it via the answer card's button.
+// Carries the live element itself, resolved once here, rather than a name
+// content.ts would have to re-resolve by fuzzy match a second time at
+// click time — the same "keep a live reference, don't re-derive it" choice
+// overlay.ts makes for the spotlight, for the same reason: a second,
+// independent fuzzy match against a possibly-changed page can land on a
+// different element than the one actually reasoned about.
 export interface AgentAction {
   kind: "click" | "type";
-  targetName: string; // accessible name of the resolved candidate, not the model's raw guess
+  targetName: string; // accessible name, for the button label and the status text
+  el: HTMLElement;
   value?: string; // text to type, for kind: "type"
 }
 
@@ -156,6 +163,27 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// A small on-device model handed both an ACTION protocol and a list of
+// clickable elements in the same prompt turns out to reach for ACTION far
+// too eagerly — it picked "click Watch" for the purely informational
+// "What does this project do?" once, apparently just because Watch was in
+// the list. Gating the whole ACTION branch (list, instructions, and
+// parsing the response for it) on the query itself looking imperative
+// removes the temptation for anything phrased as a question rather than a
+// command, the same "don't offer what isn't relevant" instinct matcher.ts
+// applies to candidate scoring.
+const ACTION_VERBS = new Set([
+  "click", "open", "press", "tap", "select", "choose", "download", "expand",
+  "collapse", "toggle", "check", "uncheck", "fill", "type", "enter", "submit",
+  "navigate", "switch", "subscribe", "unsubscribe", "follow", "unfollow",
+  "star", "unstar", "watch", "unwatch", "close", "dismiss", "delete",
+  "remove", "enable", "disable",
+]);
+
+function looksLikeActionRequest(query: string): boolean {
+  return tokenize(query).some((t) => ACTION_VERBS.has(t));
+}
+
 // Resolves the model's plain-text guess at an element ("the Download ZIP
 // button") against what's actually on the page right now, via the same
 // matcher.ts scoring the DOM-matcher mode uses — the model names a target
@@ -190,7 +218,7 @@ function parseAction(
     const resolved = resolveActionTarget(unquote(clickMatch[1]), candidates);
     if (!resolved) return null;
     return {
-      action: { kind: "click", targetName: resolved.name },
+      action: { kind: "click", targetName: resolved.name, el: resolved.el },
       explanation: explanation || `Clicking "${resolved.name}" for you.`,
     };
   }
@@ -200,7 +228,7 @@ function parseAction(
     const resolved = resolveActionTarget(unquote(typeMatch[2]), candidates);
     if (!resolved) return null;
     return {
-      action: { kind: "type", targetName: resolved.name, value: unquote(typeMatch[1]) },
+      action: { kind: "type", targetName: resolved.name, el: resolved.el, value: unquote(typeMatch[1]) },
       explanation: explanation || `Typing "${unquote(typeMatch[1])}" into "${resolved.name}" for you.`,
     };
   }
@@ -237,7 +265,14 @@ export async function* run(
       : "Couldn't capture a screenshot on this page (blocked page, or the toolbar icon hasn't been clicked yet this tab) — reasoning on the question alone.",
   };
 
-  const searchQuery = entry?.searchQuery || query;
+  // A question like "what does this project do?" is meaningless to a web
+  // search on its own — "this" only means something on the actual page.
+  // The scripted entries below sidestep that by hardcoding a real query;
+  // for anything else, folding in the page's own title is the cheapest
+  // way to ground a deictic question in what page it was actually asked
+  // on (GitHub's title is literally "owner/repo: description").
+  const pageTitle = document.title.replace(/\s+/g, " ").trim().slice(0, 80);
+  const searchQuery = entry?.searchQuery || (pageTitle ? `${pageTitle} — ${query}` : query);
   const liveResults = await webSearch(searchQuery);
   const usingLive = liveResults.length > 0;
   const sources: AgentSource[] = usingLive
@@ -295,8 +330,11 @@ export async function* run(
       : "";
     // scan(document) is the same DOM-understanding step the "On this page"
     // matcher mode uses — the model is only ever offered real, currently
-    // visible elements to act on, not asked to invent a selector.
-    const candidates = scan(document).filter((c) => c.name);
+    // visible elements to act on, not asked to invent a selector. Only
+    // gathered at all for queries that look like a command in the first
+    // place (see looksLikeActionRequest above).
+    const actionRequested = looksLikeActionRequest(query);
+    const candidates = actionRequested ? scan(document).filter((c) => c.name) : [];
     const candidateList = candidates
       .slice(0, 40)
       .map((c) => `- ${c.name} (${c.role})`)
@@ -331,7 +369,7 @@ export async function* run(
     yield { phase: "reason", text: "Thinking through the question and the page…", pending: true };
     const generated = await askLocalLLM(prompt);
     if (generated) {
-      const parsed = parseAction(generated, candidates);
+      const parsed = actionRequested ? parseAction(generated, candidates) : null;
       if (parsed) {
         answer = parsed.explanation;
         action = parsed.action;

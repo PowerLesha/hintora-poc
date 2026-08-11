@@ -511,36 +511,37 @@ function formatAnswer(text: string): string {
     .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
 }
 
-// Actually performs what the model decided on in agent.ts's ACTION parsing:
-// resolves the target's accessible name against the live DOM one more time
-// (the page may have moved on since the answer was generated) via the same
-// matcher.ts scoring the DOM-matcher mode uses, then clicks it or sets a
-// field's value for real — this is the "do it, not just show it" path.
+// Actually performs what the model decided on in agent.ts's ACTION parsing.
+// Uses the exact live element agent.ts already resolved (action.el), not a
+// second fuzzy-name lookup against a fresh scan — re-matching by name a
+// second time, independently, is exactly what once clicked a hamburger
+// menu instead of the "Issues" tab the model actually meant, because the
+// two lookups can land on different elements once anything about the page
+// (viewport width, a re-render) has shifted between generating the answer
+// and the user pressing "Do it".
 function performAction(action: AgentAction, statusEl: HTMLDivElement): void {
-  const candidates = scan(document);
-  const ranked = match(action.targetName, candidates);
-  const target = ranked[0];
-  if (!target || target.score <= 0) {
-    statusEl.textContent = "Couldn't find that element anymore — the page may have changed since this answer was generated.";
+  if (!document.documentElement.contains(action.el)) {
+    statusEl.textContent = "That element disappeared from the page — the answer above may be stale, try asking again.";
     return;
   }
 
-  overlay.show({ el: target.el, message: `Doing this for you: "${action.targetName}"` });
+  overlay.show({ el: action.el, message: `Doing this for you: "${action.targetName}"` });
   statusEl.textContent =
-    action.kind === "click" ? `Clicking "${target.name}"…` : `Typing "${action.value}" into "${target.name}"…`;
+    action.kind === "click" ? `Clicking "${action.targetName}"…` : `Typing "${action.value}" into "${action.targetName}"…`;
 
   setTimeout(() => {
     if (action.kind === "click") {
-      target.el.click();
-    } else if (target.el instanceof HTMLInputElement || target.el instanceof HTMLTextAreaElement) {
-      target.el.focus();
-      target.el.value = action.value || "";
-      target.el.dispatchEvent(new Event("input", { bubbles: true }));
-      target.el.dispatchEvent(new Event("change", { bubbles: true }));
+      action.el.click();
+    } else if (action.el instanceof HTMLInputElement || action.el instanceof HTMLTextAreaElement) {
+      action.el.focus();
+      action.el.value = action.value || "";
+      action.el.dispatchEvent(new Event("input", { bubbles: true }));
+      action.el.dispatchEvent(new Event("change", { bubbles: true }));
     } else {
-      target.el.focus();
+      action.el.focus();
     }
-    statusEl.textContent = action.kind === "click" ? `Done — clicked "${target.name}".` : `Done — typed into "${target.name}".`;
+    statusEl.textContent =
+      action.kind === "click" ? `Done — clicked "${action.targetName}".` : `Done — typed into "${action.targetName}".`;
   }, 350); // lets overlay.show()'s scrollIntoView land before the real interaction fires
 }
 
@@ -606,10 +607,14 @@ async function runAgentQuery(rawQuery: string): Promise<void> {
 
   let finalAnswer = "";
   for await (const step of runAgent(query, screenshot, conversationHistory)) {
-    if (traceRoot.querySelector(`[data-step-id="${step.phase}"]`)) {
-      updateTraceStep(traceRoot, step.phase, step.text, step.pending ?? false);
-    } else {
-      addTraceStep(traceRoot, step.phase, step.text, step.pending ?? false, step.sources);
+    // The final answer gets its own styled card below (renderAnswer) —
+    // adding it as a trace row too would just repeat the same text twice.
+    if (step.phase !== "answer") {
+      if (traceRoot.querySelector(`[data-step-id="${step.phase}"]`)) {
+        updateTraceStep(traceRoot, step.phase, step.text, step.pending ?? false);
+      } else {
+        addTraceStep(traceRoot, step.phase, step.text, step.pending ?? false, step.sources);
+      }
     }
     if (step.phase === "answer") {
       finalAnswer = step.text;
