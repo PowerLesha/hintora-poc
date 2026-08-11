@@ -251,7 +251,10 @@
       tab is actually captured, a real DuckDuckGo search runs (no API key), and the
       reasoning/answer step runs through <strong>Chrome's built-in on-device model</strong>
       (the Prompt API, Gemini Nano) if <code>chrome://flags</code> → "Prompt API for
-      Gemini Nano" is enabled — no network call, no cost, it runs on your machine.</p>
+      Gemini Nano" is enabled — no network call, no cost, it runs on your machine. If the
+      flag's on but the model itself isn't downloaded yet, the extension triggers that
+      download itself and streams real progress into the trace, instead of quietly
+      falling back the first time.</p>
       <p>Each of those three degrades gracefully to a small scripted knowledge base in
       <code>lib/agent.ts</code> when it isn't available (offline, DuckDuckGo blocking
       the request, or the on-device model not enabled) — and the trace says which path
