@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hintora PoC — browser-first guidance overlay</title>
-<meta name="description" content="A Chrome extension that reads a page's DOM and turns a plain-English question into a spotlighted button, with a small backend that makes it more reliable over time.">
+<meta name="description" content="A Chrome extension with a real multi-turn AI agent — screenshot, web search, on-device reasoning, and real clicks on the page — plus a DOM matcher that turns a plain-English question into a spotlighted button and gets more reliable over time.">
 <style>
   :root {
     --accent-1: #5b3df0;
@@ -95,7 +95,7 @@
   .video-frame video { display: block; width: 100%; background: #000; }
   .video-caption { text-align: center; color: var(--text-dimmer); font-size: 13.5px; margin-top: 14px; }
 
-  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
   .card {
     background: var(--bg-panel); border: 1px solid var(--border); border-radius: var(--radius-md);
     padding: 20px;
@@ -200,8 +200,16 @@
 
   <section id="how">
     <h2>How it works</h2>
-    <p class="section-sub">Three pieces, each mapped to a real seam in the actual product.</p>
+    <p class="section-sub">Four pieces, each mapped to a real seam in the actual product.</p>
     <div class="cards">
+      <div class="card">
+        <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16v11H9l-4 4V5z"/><circle cx="9" cy="10.5" r="0.8" fill="currentColor" stroke="none"/><circle cx="12.5" cy="10.5" r="0.8" fill="currentColor" stroke="none"/><circle cx="16" cy="10.5" r="0.8" fill="currentColor" stroke="none"/></svg></div>
+        <h3>Real agent, not a demo</h3>
+        <p>A live screenshot, a real web search, and reasoning through Chrome's
+        on-device model, in a running conversation — able to click or fill in
+        something on the page for you, not just describe it.</p>
+        <code>agent.ts</code>
+      </div>
       <div class="card">
         <div class="card-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10V4H10"/><path d="M14 4H20V10"/><path d="M4 14V20H10"/><path d="M20 14V20H14"/></svg></div>
         <h3>Page understanding</h3>
