@@ -1012,7 +1012,27 @@ ${grounding}` : "",
   function formatAnswer(text) {
     return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
   }
-  function performAction(action, statusEl) {
+  function continueWorkflow(query, clickedName, statusEl) {
+    const queryTokens = new Set(tokenize(query));
+    const step1 = { name: clickedName };
+    const workflow = WORKFLOWS.find((w) => w.appliesTo(queryTokens, step1));
+    if (!workflow) return false;
+    statusEl.textContent = `Done \u2014 clicked "${clickedName}". Looking for the next step\u2026`;
+    setTimeout(() => {
+      const next = workflow.findNextStep();
+      if (!next) {
+        statusEl.textContent = `Clicked "${clickedName}", but couldn't find the expected next step.`;
+        return;
+      }
+      overlay.show({ el: next.el, message: `Doing this for you: "${next.name}"` });
+      setTimeout(() => {
+        next.el.click();
+        statusEl.textContent = `Done \u2014 clicked "${clickedName}", then "${next.name}".`;
+      }, 350);
+    }, 350);
+    return true;
+  }
+  function performAction(action, statusEl, query) {
     if (!document.documentElement.contains(action.el)) {
       statusEl.textContent = "That element disappeared from the page \u2014 the answer above may be stale, try asking again.";
       return;
@@ -1030,7 +1050,13 @@ ${grounding}` : "",
       } else {
         action.el.focus();
       }
-      statusEl.textContent = action.kind === "click" ? `Done \u2014 clicked "${action.targetName}".` : `Done \u2014 typed into "${action.targetName}".`;
+      if (action.kind === "click") {
+        if (!continueWorkflow(query, action.targetName, statusEl)) {
+          statusEl.textContent = `Done \u2014 clicked "${action.targetName}".`;
+        }
+        return;
+      }
+      statusEl.textContent = `Done \u2014 typed into "${action.targetName}".`;
     }, 350);
   }
   function renderAnswer(answerRoot, text, targetName, action, query) {
@@ -1051,7 +1077,7 @@ ${grounding}` : "",
       btn.textContent = action.kind === "click" ? `Do it \u2014 click "${action.targetName}"` : `Do it \u2014 fill in "${action.targetName}"`;
       btn.addEventListener("click", () => {
         btn.disabled = true;
-        performAction(action, actionStatus);
+        performAction(action, actionStatus, query);
       });
       answerRoot.appendChild(btn);
       answerRoot.appendChild(actionStatus);

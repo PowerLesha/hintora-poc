@@ -298,6 +298,17 @@ entry, but the shape (trigger condition, wait for a real user action,
 re-scan, next target) is what a step-graph data model would generalize to
 for arbitrary flows.
 
+The agent's "Do it" button reuses this exact table. Ask it to "download
+this project's code" and confirm the resulting action, and `performAction`
+clicks **Code**, waits for the same real dropdown, re-scans, and clicks
+**Download ZIP** too — two real clicks from one confirmation, not two.
+It's still gated on the same `WORKFLOWS` entry rather than letting the
+model chain arbitrary steps on its own, for the same reason the single-
+step action requires an explicit "Do it": a small on-device model stringing
+together whatever clicks it feels like, unreviewed, is a different (and
+much riskier) thing than following one workflow this table already knows
+is safe.
+
 ## Mapping to Hintora's stack
 
 - TypeScript, browser extensions, injected scripts, DOM understanding,

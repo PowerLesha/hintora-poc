@@ -511,7 +511,35 @@ function formatAnswer(text: string): string {
 // lookup against a fresh scan — two independent lookups can land on
 // different elements once anything about the page has shifted between
 // generating the answer and the user pressing "Do it".
-function performAction(action: AgentAction, statusEl: HTMLDivElement): void {
+// After the click, checks the same WORKFLOWS table "On this page" mode
+// uses for its Code -> Download ZIP example: if this query+target matches
+// one, wait for the real DOM change the click just caused, re-scan, and
+// carry on to the next step too — the agent already has its one "Do it"
+// confirmation for the whole thing, so it doesn't need a second click to
+// continue a workflow it's already mid-way through.
+function continueWorkflow(query: string, clickedName: string, statusEl: HTMLDivElement): boolean {
+  const queryTokens = new Set(tokenize(query));
+  const step1 = { name: clickedName } as unknown as Candidate;
+  const workflow = WORKFLOWS.find((w) => w.appliesTo(queryTokens, step1));
+  if (!workflow) return false;
+
+  statusEl.textContent = `Done — clicked "${clickedName}". Looking for the next step…`;
+  setTimeout(() => {
+    const next = workflow.findNextStep();
+    if (!next) {
+      statusEl.textContent = `Clicked "${clickedName}", but couldn't find the expected next step.`;
+      return;
+    }
+    overlay.show({ el: next.el, message: `Doing this for you: "${next.name}"` });
+    setTimeout(() => {
+      next.el.click();
+      statusEl.textContent = `Done — clicked "${clickedName}", then "${next.name}".`;
+    }, 350);
+  }, 350); // gives the page's own UI (e.g. a dropdown) time to render
+  return true;
+}
+
+function performAction(action: AgentAction, statusEl: HTMLDivElement, query: string): void {
   if (!document.documentElement.contains(action.el)) {
     statusEl.textContent = "That element disappeared from the page — the answer above may be stale, try asking again.";
     return;
@@ -532,8 +560,14 @@ function performAction(action: AgentAction, statusEl: HTMLDivElement): void {
     } else {
       action.el.focus();
     }
-    statusEl.textContent =
-      action.kind === "click" ? `Done — clicked "${action.targetName}".` : `Done — typed into "${action.targetName}".`;
+
+    if (action.kind === "click") {
+      if (!continueWorkflow(query, action.targetName, statusEl)) {
+        statusEl.textContent = `Done — clicked "${action.targetName}".`;
+      }
+      return;
+    }
+    statusEl.textContent = `Done — typed into "${action.targetName}".`;
   }, 350); // lets overlay.show()'s scrollIntoView land before the real interaction fires
 }
 
@@ -559,7 +593,7 @@ function renderAnswer(answerRoot: HTMLDivElement, text: string, targetName: stri
     btn.textContent = action.kind === "click" ? `Do it — click "${action.targetName}"` : `Do it — fill in "${action.targetName}"`;
     btn.addEventListener("click", () => {
       btn.disabled = true;
-      performAction(action, actionStatus);
+      performAction(action, actionStatus, query);
     });
     answerRoot.appendChild(btn);
     answerRoot.appendChild(actionStatus);
