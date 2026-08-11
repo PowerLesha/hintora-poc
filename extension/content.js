@@ -448,7 +448,7 @@
     for (const entry of KNOWLEDGE_BASE) {
       let score = 0;
       for (const t of qTokens) {
-        if (entry.triggerTokens.some((trig) => t.includes(trig) || trig.includes(t))) score += 1;
+        if (t.length > 2 && entry.triggerTokens.some((trig) => t.includes(trig) || trig.includes(t))) score += 1;
       }
       if (score > bestScore) {
         best = entry;

@@ -145,7 +145,12 @@ function pickEntry(query: string): AgentEntry | null {
   for (const entry of KNOWLEDGE_BASE) {
     let score = 0;
     for (const t of qTokens) {
-      if (entry.triggerTokens.some((trig) => t.includes(trig) || trig.includes(t))) score += 1;
+      // Below length 3, containment stops meaning anything: "s" (the tail
+      // of "project's" once the apostrophe splits it off) is a substring
+      // of "safe", which was enough on its own to route a download
+      // question into the security entry's canned context. matcher.ts
+      // guards its own substring check the same way.
+      if (t.length > 2 && entry.triggerTokens.some((trig) => t.includes(trig) || trig.includes(t))) score += 1;
     }
     if (score > bestScore) {
       best = entry;
