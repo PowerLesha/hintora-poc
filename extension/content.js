@@ -957,9 +957,59 @@ ${grounding}` : "",
       activeWorkflowCleanup = () => target.el.removeEventListener("click", onClick, { capture: true });
     }
   }
-  function captureScreenshot() {
+  function captureVisibleTabOnce() {
     return new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: "HINTORA_CAPTURE_SCREENSHOT" }, (res) => resolve(res?.dataUrl || null));
+    });
+  }
+  function sleep2(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+  var MAX_SCREENSHOT_SEGMENTS = 8;
+  async function captureScreenshot() {
+    const viewportHeight = window.innerHeight;
+    const totalHeight = Math.min(document.documentElement.scrollHeight, viewportHeight * MAX_SCREENSHOT_SEGMENTS);
+    if (totalHeight <= viewportHeight + 4) return captureVisibleTabOnce();
+    const originalY = window.scrollY;
+    const shots = [];
+    for (let y = 0; y < totalHeight; y += viewportHeight) {
+      window.scrollTo(0, Math.min(y, totalHeight - viewportHeight));
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 300)));
+      const dataUrl = await captureVisibleTabOnce();
+      if (!dataUrl) break;
+      const actualY = window.scrollY;
+      if (shots.length && actualY === shots[shots.length - 1].y) break;
+      shots.push({ y: actualY, dataUrl });
+      await sleep2(350);
+    }
+    window.scrollTo(0, originalY);
+    if (shots.length <= 1) return shots[0]?.dataUrl || null;
+    return stitchScreenshots(shots, viewportHeight);
+  }
+  function stitchScreenshots(shots, viewportHeight) {
+    return new Promise((resolve) => {
+      const images = shots.map(() => new Image());
+      let settled = 0;
+      images.forEach((img, i) => {
+        const onSettle = () => {
+          settled++;
+          if (settled < images.length) return;
+          const scale = images[0].naturalHeight / viewportHeight;
+          const canvas = document.createElement("canvas");
+          canvas.width = images[0].naturalWidth || 0;
+          canvas.height = Math.round((shots[shots.length - 1].y + viewportHeight) * scale);
+          const ctx = canvas.getContext("2d");
+          if (!ctx || !canvas.width || !canvas.height) {
+            resolve(shots[0].dataUrl);
+            return;
+          }
+          shots.forEach((shot, j) => ctx.drawImage(images[j], 0, Math.round(shot.y * scale)));
+          resolve(canvas.toDataURL("image/jpeg", 0.6));
+        };
+        img.onload = onSettle;
+        img.onerror = onSettle;
+        img.src = shots[i].dataUrl;
+      });
     });
   }
   function createTurn(query) {

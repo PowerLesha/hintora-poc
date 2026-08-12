@@ -420,9 +420,78 @@ function showStep(target: Candidate, query: string, stepLabel?: string): void {
 
 // Real screenshot capture, relayed through background.ts the same way the
 // backend fetch is (a content script can't call chrome.tabs.* itself).
-function captureScreenshot(): Promise<string | null> {
+// chrome.tabs.captureVisibleTab only ever grabs the current viewport —
+// Manifest V3 has no page-length capture call short of the intrusive
+// "debugger" permission — so a full-page image means scrolling through the
+// page in viewport-sized steps, capturing each step, and stitching the
+// results into one canvas.
+function captureVisibleTabOnce(): Promise<string | null> {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type: "HINTORA_CAPTURE_SCREENSHOT" }, (res) => resolve(res?.dataUrl || null));
+  });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Bounds capture time (and memory for the stitched canvas) on very tall or
+// infinite-scroll pages — most real pages finish in 1-3 segments anyway.
+const MAX_SCREENSHOT_SEGMENTS = 8;
+
+async function captureScreenshot(): Promise<string | null> {
+  const viewportHeight = window.innerHeight;
+  const totalHeight = Math.min(document.documentElement.scrollHeight, viewportHeight * MAX_SCREENSHOT_SEGMENTS);
+
+  // Already fits in one viewport — skip the scroll/stitch dance entirely.
+  if (totalHeight <= viewportHeight + 4) return captureVisibleTabOnce();
+
+  const originalY = window.scrollY;
+  const shots: { y: number; dataUrl: string }[] = [];
+  for (let y = 0; y < totalHeight; y += viewportHeight) {
+    window.scrollTo(0, Math.min(y, totalHeight - viewportHeight));
+    // Let layout/paint (and any scroll-triggered lazy content) settle
+    // before capturing, and give captureVisibleTab's rate limit room.
+    await new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 300)));
+    const dataUrl = await captureVisibleTabOnce();
+    if (!dataUrl) break; // rate-limited or blocked — use whatever was captured so far
+    const actualY = window.scrollY; // clamped by the browser once near the bottom
+    if (shots.length && actualY === shots[shots.length - 1].y) break; // already at the bottom
+    shots.push({ y: actualY, dataUrl });
+    await sleep(350);
+  }
+  window.scrollTo(0, originalY);
+
+  if (shots.length <= 1) return shots[0]?.dataUrl || null;
+  return stitchScreenshots(shots, viewportHeight);
+}
+
+function stitchScreenshots(shots: { y: number; dataUrl: string }[], viewportHeight: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    const images = shots.map(() => new Image());
+    let settled = 0;
+    images.forEach((img, i) => {
+      const onSettle = () => {
+        settled++;
+        if (settled < images.length) return;
+        // captureVisibleTab renders at device-pixel resolution, so derive
+        // the scale factor from the actual image instead of assuming DPR.
+        const scale = images[0].naturalHeight / viewportHeight;
+        const canvas = document.createElement("canvas");
+        canvas.width = images[0].naturalWidth || 0;
+        canvas.height = Math.round((shots[shots.length - 1].y + viewportHeight) * scale);
+        const ctx = canvas.getContext("2d");
+        if (!ctx || !canvas.width || !canvas.height) {
+          resolve(shots[0].dataUrl);
+          return;
+        }
+        shots.forEach((shot, j) => ctx.drawImage(images[j], 0, Math.round(shot.y * scale)));
+        resolve(canvas.toDataURL("image/jpeg", 0.6));
+      };
+      img.onload = onSettle;
+      img.onerror = onSettle;
+      img.src = shots[i].dataUrl;
+    });
   });
 }
 
